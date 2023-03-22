@@ -1,0 +1,31 @@
+info:
+  version: "@project.version@"
+  dependencies:
+    boot:
+      version: "@spring-boot.version@"
+
+spring:
+  main:
+    allow-bean-definition-overriding: false
+  application:
+    name: @project.artifactId@
+
+  jackson:
+    property-naming-strategy: LOWER_CAMEL_CASE
+    default-property-inclusion: non_null
+    serialization:
+      write_dates_as_timestamps: false
+      write_dates_with_zone_id: true
+      write_bigdecimal_as_plain: true
+    deserialization:
+      fail_on_unknown_properties: false
+      adjust_dates_to_context_time_zone: false
+      use_big_decimal_for_floats: true
+
+infra:
+  oanda:
+    v20:
+      devStreamUrl: "https://stream-fxpractice.oanda.com"
+      prodStreamUrl: "https://stream-fxtrade.oanda.com"
+      devRestUrl: "https://api-fxpractice.oanda.com"
+      prodRestUrl: "https://api-fxtrade.oanda.com"
