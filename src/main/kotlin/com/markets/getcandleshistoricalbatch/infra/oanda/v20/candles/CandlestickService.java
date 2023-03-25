@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.ReadFileUtil.FirstAndLastLine;
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.ReadFileUtil.getFirstAndLastLineFromFile;
+import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.WriteFileUtil.writeStringToFile;
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvCandle.getSchemaHeader;
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvUtil.csvStringToCsvCandlePojo;
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState.*;
@@ -158,19 +159,7 @@ public class CandlestickService {
         .collect(joining(""));
 
     try {
-      var path = Paths.get(filePath);
-      if (!Files.exists(path)) {
-        log.warn("Creating file that doesn't exist: {}", filePath);
-        Files.createFile(path);
-        contentToAppend = "%s\n%s".formatted(getSchemaHeader(), contentToAppend);
-      }
-
-      log.debug("Writing to file: {}", filePath);
-      Files.writeString(
-          path,
-          contentToAppend,
-          StandardOpenOption.APPEND);
-      log.debug("Done with file: {}", filePath);
+      writeStringToFile(filePath, contentToAppend);
       return SUCCESS;
     } catch (IOException e) {
       log.error("Error while appending candles to file: {}", filePath);
