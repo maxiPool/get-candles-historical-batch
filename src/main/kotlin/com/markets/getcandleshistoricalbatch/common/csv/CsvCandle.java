@@ -1,10 +1,10 @@
-package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil;
+package com.markets.getcandleshistoricalbatch.common.csv;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import com.oanda.v20.primitives.DateTime;
 import lombok.*;
+
+import java.time.ZonedDateTime;
 
 @Getter
 @Setter
@@ -23,7 +23,7 @@ import lombok.*;
 public class CsvCandle {
 
   @JsonProperty("time")
-  private DateTime time;
+  private ZonedDateTime time;
 
   @JsonProperty("open")
   private Double open;
@@ -42,10 +42,5 @@ public class CsvCandle {
 
   @JsonProperty("isComplete")
   private Integer isComplete;
-
-  @JsonIgnore
-  public static String getSchemaHeader() {
-    return "time,open,high,low,close,volume,isComplete";
-  }
 
 }

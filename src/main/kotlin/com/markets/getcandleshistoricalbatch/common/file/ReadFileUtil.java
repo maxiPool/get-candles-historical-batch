@@ -1,41 +1,35 @@
-package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles;
+package com.markets.getcandleshistoricalbatch.common.file;
 
-import lombok.Builder;
-import lombok.With;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
+import org.springframework.lang.Nullable;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 @Slf4j
 @UtilityClass
 public class ReadFileUtil {
 
-  @With
-  @Builder
-  public record FirstAndLastLine(String first, String last) {
-    public static FirstAndLastLine empty() {
-      return new FirstAndLastLine("", "");
+  @Nullable
+  public static String getLastLineFromCsvCandleFile(String fileName) {
+    if (!Files.exists(Paths.get(fileName))) {
+      log.info("File doesn't exist: {}", fileName);
+      return null;
     }
-  }
-
-  public static FirstAndLastLine getFirstAndLastLineFromFile(String fileName) {
     try (RandomAccessFile file = new RandomAccessFile(fileName, "r")) {
       var fileLength = file.length();
       if (fileLength == 0) {
-        return FirstAndLastLine.empty();
+        return null;
       }
 
-      return FirstAndLastLine
-          .builder()
-          .first(readLineFromStart(file, fileLength))
-          .last(readLineFromEnd(file, fileLength - 1 /* end of last line */))
-          .build();
+      return readLineFromEnd(file, fileLength - 1 /* end of last line */);
     } catch (IOException e) {
-      log.error("Error while reading file: {}", fileName);
-      return FirstAndLastLine.empty();
+      log.error("Error while reading file: {}", fileName, e);
+      return null;
     }
   }
 
@@ -55,21 +49,6 @@ public class ReadFileUtil {
     }
 
     return sb.reverse().toString(); // \n\rolleh --> hello\r\n
-  }
-
-  @NotNull
-  private static String readLineFromStart(RandomAccessFile file, long fileLength) throws IOException {
-    var sb = new StringBuilder();
-    var filePointer = 0L;
-
-    while (filePointer < fileLength) {
-      if (isNewLineAndReadByte(file, sb, filePointer)) {
-        break;
-      }
-      filePointer++;
-    }
-
-    return sb.toString();
   }
 
   private static boolean isNewLineAndReadByte(RandomAccessFile file, StringBuilder sb, long filePointer) throws IOException {

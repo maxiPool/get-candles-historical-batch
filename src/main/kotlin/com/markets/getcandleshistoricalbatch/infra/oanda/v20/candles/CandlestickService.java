@@ -1,19 +1,16 @@
 package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles;
 
+import com.markets.getcandleshistoricalbatch.common.csv.CsvCandle;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.CommonUtils;
-import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvCandle;
-import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvUtil;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState;
+import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.InstrumentCandleRequestInfo;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.EInstrument;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.GetCandlesResponse;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
 import com.oanda.v20.instrument.Candlestick;
 import com.oanda.v20.instrument.CandlestickGranularity;
-import com.oanda.v20.primitives.DateTime;
-import lombok.Builder;
 import lombok.RequiredArgsConstructor;
-import lombok.With;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Service;
@@ -21,99 +18,106 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
-import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.ReadFileUtil.FirstAndLastLine;
-import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.ReadFileUtil.getFirstAndLastLineFromFile;
-import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.WriteFileUtil.writeStringToFile;
-import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvCandle.getSchemaHeader;
-import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvUtil.csvStringToCsvCandlePojo;
+import static com.markets.getcandleshistoricalbatch.common.csv.CsvUtil.*;
+import static com.markets.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
+import static com.markets.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
+import static com.markets.getcandleshistoricalbatch.common.file.WriteFileUtil.writeToFileThatDoesntExist;
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState.*;
+import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.EInstrument.INSTRUMENT_LIST;
 import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.Rfc3339.YMDHMS_FORMATTER;
+import static com.oanda.v20.instrument.CandlestickGranularity.M1;
+import static com.oanda.v20.instrument.CandlestickGranularity.M15;
 import static java.time.temporal.ChronoUnit.MINUTES;
 import static java.time.temporal.ChronoUnit.SECONDS;
 import static java.util.Optional.ofNullable;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
-import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.stream.Collectors.*;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class CandlestickService {
-  private static final int MAX_CANDLE_COUNT_OANDA_API = 5_000;
+  public static final int MAX_CANDLE_COUNT_OANDA_API = 5_000;
 
   private final V20Properties v20Properties;
   private final OandaRestResource oandaRestResource;
   private final CandlestickMapper candlestickMapper;
 
-  @Builder
-  @With
-  public record InstrumentCandleRequestInfo(EInstrument instrument,
-                                            CandlestickGranularity granularity,
-                                            String outputPath,
-                                            FirstAndLastLine firstAndLastLine, /* for logs */
-                                            DateTime dateTime /* for logs */) {
+  public void runGetNextCandlesBatch() {
+    log.info("Launching get candles historical data batch job");
+    var granularityList = List.of(M15, M1);
+
+    var candleRequestInfoList = getRequestInfoList(INSTRUMENT_LIST, granularityList);
+    logLastCandleTimesBreakdown(candleRequestInfoList);
+    getCandlesForMany(candleRequestInfoList);
   }
 
-  public void logLastCandleTimesBreakdown(List<EInstrument> instrumentList, List<CandlestickGranularity> granularityList) {
-    var lastCandleTimes = getInstrumentToGranularityToPath(instrumentList, granularityList)
+  private void logLastCandleTimesBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
+    var lastCandleTimes = instrumentCandleRequestInfoList
         .stream()
-        .map(i -> i.withFirstAndLastLine(getFirstAndLastLineFromFile(i.outputPath())))
-        .map(i -> {
-          var lastLine = "%s\n%s".formatted(getSchemaHeader(), i.firstAndLastLine().last());
-          var maybeCsvCandle = ofNullable(csvStringToCsvCandlePojo(lastLine));
-          return i.withDateTime(maybeCsvCandle.map(CsvCandle::getTime).orElse(null));
-        })
         .collect(groupingBy(InstrumentCandleRequestInfo::dateTime,
             mapping(i -> "%s-%s".formatted(i.instrument().name(), i.granularity().name()), toList())));
 
     log.info("Last candle times breakdown");
+    System.out.println(lastCandleTimes
+        .keySet().stream()
+        .sorted()
+        .map(d -> d.format(YMDHMS_FORMATTER))
+        .collect(joining("\n")));
     CommonUtils.printJson(lastCandleTimes);
   }
 
-  public void getCandlesForMany(List<EInstrument> instrumentList, List<CandlestickGranularity> granularityList) {
-    var total = instrumentList.size() * granularityList.size();
-
-    var getCandlesStates = getInstrumentToGranularityToPath(instrumentList, granularityList)
+  public void getCandlesForMany(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
+    var getCandlesStates = instrumentCandleRequestInfoList
         .stream()
-        .map(i -> supplyAsync(() -> getCandlesFor(i.instrument(), i.granularity(), i.outputPath())))
+        .map(i -> supplyAsync(() -> getCandlesFor(i)))
         .collect(collectingAndThen(toList(),
             fs -> fs
                 .stream()
                 .map(CompletableFuture::join)
                 .toList()));
 
-    log.info("Get candles done for {}/{} files ({} instruments on {} granularity levels); breakdown: {}",
-        getCandlesStates.stream().filter(s -> s != ERROR).count(),
-        total,
-        instrumentList.size(),
-        granularityList.size(),
-        getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
-
-    newSingleThreadScheduledExecutor().schedule(() -> System.exit(0), 1_000, MILLISECONDS);
+    logGetCandlesFromApiBreakdown(instrumentCandleRequestInfoList, getCandlesStates);
   }
 
-  public EGetCandlesState getCandlesFor(EInstrument instrument, CandlestickGranularity granularity, String filePath) {
-    if (Files.notExists(Paths.get(filePath))) {
-      var response = getCandlestickWithCount(instrument, granularity, MAX_CANDLE_COUNT_OANDA_API);
-      return SUCCESS == onComplete(response.getCandles(), filePath)
+  private static void logGetCandlesFromApiBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList,
+                                                    List<EGetCandlesState> getCandlesStates) {
+    var nbOfDistinctInstruments =
+        getNbOfDistinctKeys(instrumentCandleRequestInfoList, InstrumentCandleRequestInfo::instrument);
+    var nbOfDistinctGranularities =
+        getNbOfDistinctKeys(instrumentCandleRequestInfoList, InstrumentCandleRequestInfo::granularity);
+    log.info("Get candles done for {}/{} files ({} instruments on {} granularity levels); breakdown: {}",
+        getCandlesStates.stream().filter(s -> s != ERROR).count(),
+        instrumentCandleRequestInfoList.size(),
+        nbOfDistinctInstruments,
+        nbOfDistinctGranularities,
+        getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
+  }
+
+  /**
+   * Gets the candles for the instrument and appends them to the output path defined in configuration.
+   */
+  public EGetCandlesState getCandlesFor(InstrumentCandleRequestInfo i) {
+    if (Files.notExists(Paths.get(i.outputPath()))) {
+      var response = getCandlestickWithCount(i.instrument(), i.granularity(), MAX_CANDLE_COUNT_OANDA_API);
+      return SUCCESS == onComplete(response.getCandles(), i.outputPath())
           ? NEW_GET_5K_CANDLES
           : ERROR;
     } else {
-      var lastTimePlusGranularity = Instant.parse(getLastCandle(filePath).getTime().toString())
-          .plus(granularityToSeconds(granularity), SECONDS);
+      var lastTimePlusGranularity = Instant.parse(i.dateTime().format(YMDHMS_FORMATTER))
+          .plus(granularityToSeconds(i.granularity()), SECONDS);
 
-      if (isNextCandleComplete(instrument, granularity, lastTimePlusGranularity)) {
-        var response = getCandlesFromTime(instrument, granularity, lastTimePlusGranularity);
+      if (isNextCandleComplete(i.instrument(), i.granularity(), lastTimePlusGranularity)) {
+        var response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
         if (response.getCandles().isEmpty()) {
           return NO_NEW_CANDLES;
         }
-        return onComplete(response.getCandles(), filePath);
+        return onComplete(response.getCandles(), i.outputPath());
       }
       return NEXT_CANDLE_NOT_COMPLETE;
     }
@@ -151,42 +155,52 @@ public class CandlestickService {
   }
 
   private EGetCandlesState onComplete(List<Candlestick> candles, String filePath) {
-    var contentToAppend = candles
+    var candlesArray = candles
         .stream()
         .filter(Candlestick::getComplete)
         .map(candlestickMapper::oandaCandleToCsvCandle)
-        .map(CsvUtil::candleToCsv)
-        .collect(joining(""));
+        .toArray(CsvCandle[]::new);
 
     try {
-      writeStringToFile(filePath, contentToAppend);
+      var path = Paths.get(filePath);
+      if (!Files.exists(path)) {
+        log.warn("Creating new file: {}", filePath);
+        writeToFileThatDoesntExist(filePath, candlesToCsvWithHeader(candlesArray));
+      } else {
+        appendStringToFile(filePath, candlesToCsvWithoutHeader(candlesArray));
+      }
       return SUCCESS;
     } catch (IOException e) {
-      log.error("Error while appending candles to file: {}", filePath);
+      log.error("Error while appending candles to file: {}", filePath, e);
       return ERROR;
     }
   }
 
-  public static CsvCandle getLastCandle(String filePath) {
-    var firstAndLastLine = getFirstAndLastLineFromFile(filePath);
-    var concat = "%s\n%s".formatted(firstAndLastLine.first(), firstAndLastLine.last());
-    return csvStringToCsvCandlePojo(concat);
-  }
-
   @NotNull
-  private List<InstrumentCandleRequestInfo> getInstrumentToGranularityToPath(
+  public List<InstrumentCandleRequestInfo> getRequestInfoList(
       List<EInstrument> instrumentList, List<CandlestickGranularity> granularityList) {
     return instrumentList
         .stream()
-        .flatMap(i -> granularityList
-            .stream()
-            .map(g -> InstrumentCandleRequestInfo
-                .builder()
-                .granularity(g)
-                .instrument(i)
-                .outputPath(v20Properties.candlestick().outputPathTemplate().formatted(i.toString(), g))
-                .build()))
+        .flatMap(i -> granularityList.stream().map(g -> getRequestInfo(i, g)))
         .toList();
+  }
+
+  private InstrumentCandleRequestInfo getRequestInfo(EInstrument i, CandlestickGranularity g) {
+    var outputPath = v20Properties.candlestick().outputPathTemplate().formatted(i.toString(), g);
+    var lastLine = getLastLineFromCsvCandleFile(outputPath);
+    var maybeCandle = csvStringWithoutHeaderToCsvCandlePojo(lastLine);
+    var dateTime = ofNullable(maybeCandle)
+        .map(CsvCandle::getTime)
+        .orElse(null);
+
+    return InstrumentCandleRequestInfo
+        .builder()
+        .granularity(g)
+        .instrument(i)
+        .outputPath(outputPath)
+        .lastLine(lastLine)
+        .dateTime(dateTime)
+        .build();
   }
 
   private static long granularityToSeconds(CandlestickGranularity granularity) {
@@ -213,6 +227,14 @@ public class CandlestickService {
       case W -> 604_800; // assuming 7 days
       case M -> throw new UnsupportedOperationException("No seconds for monthly; ambiguous number of days");
     };
+  }
+
+  private static <S, T> long getNbOfDistinctKeys(List<S> sList, Function<S, T> keyExtractor) {
+    return sList
+        .stream()
+        .map(keyExtractor)
+        .distinct()
+        .count();
   }
 
 }

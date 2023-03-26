@@ -1,6 +1,6 @@
 package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles;
 
-import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.csvutil.CsvCandle;
+import com.markets.getcandleshistoricalbatch.common.csv.CsvCandle;
 import com.oanda.v20.instrument.Candlestick;
 import com.oanda.v20.pricing_common.PriceValue;
 import com.oanda.v20.primitives.DateTime;
@@ -9,14 +9,16 @@ import org.mapstruct.Mapping;
 import org.mapstruct.Named;
 
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 
-import static com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.Rfc3339.YMDHMS_FORMATTER;
 import static org.mapstruct.MappingConstants.ComponentModel.SPRING;
 
 @Mapper(componentModel = SPRING)
 public interface CandlestickMapper {
 
   String RFC3339_IN_SECONDS = "RFC3339_IN_SECONDS";
+  ZoneId ZONE_ID_UTC = ZoneId.of("UTC");
 
   @Mapping(target = "open", source = "mid.o")
   @Mapping(target = "high", source = "mid.h")
@@ -35,10 +37,8 @@ public interface CandlestickMapper {
   }
 
   @Named(RFC3339_IN_SECONDS)
-  default DateTime dateTimeInSeconds(DateTime dateTime) {
-    return new DateTime(
-        YMDHMS_FORMATTER.format(
-            Instant.parse(dateTime.toString())));
+  default ZonedDateTime dateTimeInSeconds(DateTime dateTime) {
+    return ZonedDateTime.ofInstant(Instant.parse(dateTime.toString()), ZONE_ID_UTC);
   }
 
 }
