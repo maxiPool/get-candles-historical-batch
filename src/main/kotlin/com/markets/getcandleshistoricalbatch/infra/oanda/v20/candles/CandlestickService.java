@@ -1,5 +1,6 @@
 package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles;
 
+import com.markets.getcandleshistoricalbatch.common.JsonPrinter;
 import com.markets.getcandleshistoricalbatch.common.csv.CsvCandle;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.InstrumentCandleRequestInfo;
@@ -22,7 +23,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
-import static com.markets.getcandleshistoricalbatch.common.JsonPrinter.printJson;
 import static com.markets.getcandleshistoricalbatch.common.csv.CsvUtil.*;
 import static com.markets.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static com.markets.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
@@ -69,7 +69,7 @@ public class CandlestickService {
         .sorted()
         .map(d -> d.format(YMDHMS_FORMATTER))
         .collect(joining("\n")));
-    printJson(lastCandleTimes);
+    JsonPrinter.printJson(lastCandleTimes);
   }
 
   public void getCandlesForMany(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
