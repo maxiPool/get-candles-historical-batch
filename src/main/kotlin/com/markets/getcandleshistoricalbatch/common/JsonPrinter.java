@@ -1,4 +1,4 @@
-package com.markets.getcandleshistoricalbatch.infra.oanda.v20;
+package com.markets.getcandleshistoricalbatch.common;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,7 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @UtilityClass
 @Slf4j
-public class CommonUtils {
+public class JsonPrinter {
 
   public void printJson(Object object) {
     try {

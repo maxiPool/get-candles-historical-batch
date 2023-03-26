@@ -1,7 +1,6 @@
 package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles;
 
 import com.markets.getcandleshistoricalbatch.common.csv.CsvCandle;
-import com.markets.getcandleshistoricalbatch.infra.oanda.v20.CommonUtils;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.InstrumentCandleRequestInfo;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
@@ -23,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import static com.markets.getcandleshistoricalbatch.common.JsonPrinter.printJson;
 import static com.markets.getcandleshistoricalbatch.common.csv.CsvUtil.*;
 import static com.markets.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static com.markets.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
@@ -69,7 +69,7 @@ public class CandlestickService {
         .sorted()
         .map(d -> d.format(YMDHMS_FORMATTER))
         .collect(joining("\n")));
-    CommonUtils.printJson(lastCandleTimes);
+    printJson(lastCandleTimes);
   }
 
   public void getCandlesForMany(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
@@ -91,12 +91,12 @@ public class CandlestickService {
         getNbOfDistinctKeys(instrumentCandleRequestInfoList, InstrumentCandleRequestInfo::instrument);
     var nbOfDistinctGranularities =
         getNbOfDistinctKeys(instrumentCandleRequestInfoList, InstrumentCandleRequestInfo::granularity);
-    log.info("Get candles done for {}/{} files ({} instruments on {} granularity levels); breakdown: {}",
+    log.info("Get candles done for {}/{} files ({} instruments on {} granularity levels)",
         getCandlesStates.stream().filter(s -> s != ERROR).count(),
         instrumentCandleRequestInfoList.size(),
         nbOfDistinctInstruments,
-        nbOfDistinctGranularities,
-        getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
+        nbOfDistinctGranularities);
+    log.info("Breakdown: {}", getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
   }
 
   /**
