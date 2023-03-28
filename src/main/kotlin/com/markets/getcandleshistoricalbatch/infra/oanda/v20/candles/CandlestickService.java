@@ -52,9 +52,8 @@ public class CandlestickService {
     log.info("Launching get candles historical data batch job");
     var granularityList = List.of(M15, M1);
 
-    var candleRequestInfoList = getRequestInfoList(INSTRUMENT_LIST, granularityList);
-    logLastCandleTimesBreakdown(candleRequestInfoList);
-    getCandlesForMany(candleRequestInfoList);
+    getCandlesForMany(getRequestInfoList(INSTRUMENT_LIST, granularityList));
+    logLastCandleTimesBreakdown(getRequestInfoList(INSTRUMENT_LIST, granularityList));
   }
 
   private void logLastCandleTimesBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
