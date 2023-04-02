@@ -1,7 +1,7 @@
 package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles;
 
-import com.markets.getcandleshistoricalbatch.common.JsonPrinter;
 import com.markets.getcandleshistoricalbatch.common.csv.CsvCandle;
+import com.markets.getcandleshistoricalbatch.common.log.LogFileService;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.InstrumentCandleRequestInfo;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
@@ -19,6 +19,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -43,10 +45,12 @@ import static java.util.stream.Collectors.*;
 @RequiredArgsConstructor
 public class CandlestickService {
   public static final int MAX_CANDLE_COUNT_OANDA_API = 5_000;
+  public static final ZoneId ZONE_TORONTO = ZoneId.of("America/Toronto");
 
   private final V20Properties v20Properties;
   private final OandaRestResource oandaRestResource;
   private final CandlestickMapper candlestickMapper;
+  private final LogFileService logFileService;
 
   public void runGetNextCandlesBatch() {
     log.info("Launching get candles historical data batch job");
@@ -56,19 +60,21 @@ public class CandlestickService {
     logLastCandleTimesBreakdown(getRequestInfoList(INSTRUMENT_LIST, granularityList));
   }
 
-  private void logLastCandleTimesBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
+  public void logLastCandleTimesBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
     var lastCandleTimes = instrumentCandleRequestInfoList
         .stream()
         .collect(groupingBy(InstrumentCandleRequestInfo::dateTime,
             mapping(i -> "%s-%s".formatted(i.instrument().name(), i.granularity().name()), toList())));
 
     log.info("Last candle times breakdown");
-    System.out.println(lastCandleTimes
+    var message = lastCandleTimes
         .keySet().stream()
         .sorted()
         .map(d -> d.format(YMDHMS_FORMATTER))
-        .collect(joining("\n")));
-    JsonPrinter.printJson(lastCandleTimes);
+        .collect(joining("\n"));
+    log.info(message);
+    logFileService.logToFile("\n\nLast candle times breakdown as of %s\n%s"
+        .formatted(ZonedDateTime.now(ZONE_TORONTO), message));
   }
 
   public void getCandlesForMany(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
@@ -84,18 +90,23 @@ public class CandlestickService {
     logGetCandlesFromApiBreakdown(instrumentCandleRequestInfoList, getCandlesStates);
   }
 
-  private static void logGetCandlesFromApiBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList,
-                                                    List<EGetCandlesState> getCandlesStates) {
+  private void logGetCandlesFromApiBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList,
+                                             List<EGetCandlesState> getCandlesStates) {
     var nbOfDistinctInstruments =
         getNbOfDistinctKeys(instrumentCandleRequestInfoList, InstrumentCandleRequestInfo::instrument);
     var nbOfDistinctGranularities =
         getNbOfDistinctKeys(instrumentCandleRequestInfoList, InstrumentCandleRequestInfo::granularity);
-    log.info("Get candles done for {}/{} files ({} instruments on {} granularity levels)",
+
+    var msg1 = "Get candles done for %d/%d files (%d instruments on %d granularity levels)".formatted(
         getCandlesStates.stream().filter(s -> s != ERROR).count(),
         instrumentCandleRequestInfoList.size(),
         nbOfDistinctInstruments,
         nbOfDistinctGranularities);
-    log.info("Breakdown: {}", getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
+    var msg2 = "Breakdown: %s".formatted(getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
+    log.info(msg1);
+    log.info(msg2);
+    logFileService.logToFile("%s\n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), msg1));
+    logFileService.logToFile("\n\n%s\n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), msg2));
   }
 
   /**
