@@ -123,7 +123,13 @@ public class CandlestickService {
           .plus(granularityToSeconds(i.granularity()), SECONDS);
 
       if (isNextCandleComplete(i.instrument(), i.granularity(), lastTimePlusGranularity)) {
-        var response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
+        GetCandlesResponse response = null;
+        try {
+          response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
+        } catch (Exception e) {
+          log.error("Error while trying to get candles from time for {}", i.instrument());
+          return ERROR;
+        }
         if (response.getCandles().isEmpty()) {
           return NO_NEW_CANDLES;
         }
