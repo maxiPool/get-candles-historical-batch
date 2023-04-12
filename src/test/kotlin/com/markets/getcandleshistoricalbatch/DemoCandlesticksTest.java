@@ -54,6 +54,18 @@ public class DemoCandlesticksTest {
             .build());
   }
 
+  /**
+   * It seems the from-to timestamp endpoint doesn't work all that great.
+   * So let's try to do it using the count endpoint.
+   * We will need to discard while the resource candles are <= last candle time to correctly merge them.
+   */
+  @Test
+  void should_getCandlesForAU200_AUD_15M_whenFileExists_andUsingCountEndpoint() {
+    var candleRequestInfo =
+        candlestickService.getRequestInfoList(List.of(EInstrument.AU200_AUD), List.of(M15)).get(0);
+    candlestickService.getCandlesFor(candleRequestInfo);
+  }
+
   @Test
   void should_getCandlesForAU200_AUD_15M_whenFileExists() {
     var soft = new SoftAssertions();

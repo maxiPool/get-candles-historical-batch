@@ -114,30 +114,44 @@ public class CandlestickService {
    */
   public EGetCandlesState getCandlesFor(InstrumentCandleRequestInfo i) {
     if (Files.notExists(Paths.get(i.outputPath()))) {
+      return getWithCount(i, Instant.MIN);
+    } else {
+      var lastTime = Instant.parse(i.dateTime().format(YMDHMS_FORMATTER));
+      var lastTimePlusGranularity = lastTime.plus(granularityToSeconds(i.granularity()), SECONDS);
+
+      if (!isNextCandleComplete(i.instrument(), i.granularity(), lastTimePlusGranularity)) {
+        return NEXT_CANDLE_NOT_COMPLETE;
+      }
+
+      GetCandlesResponse response = null;
+      try {
+        response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
+      } catch (Exception e) {
+        var msg = "\nError while trying to get candles from time for %s; will try getting it using count".formatted(i.instrument());
+        log.error(msg);
+        logFileService.logToFile(msg);
+        return getWithCount(i, lastTime);
+      }
+
+      if (response.getCandles().isEmpty()) {
+        return NO_NEW_CANDLES;
+      }
+      return onComplete(response.getCandles(), i.outputPath(), lastTime);
+    }
+  }
+
+  @NotNull
+  private EGetCandlesState getWithCount(InstrumentCandleRequestInfo i, Instant lastTime) {
+    try {
       var response = getCandlestickWithCount(i.instrument(), i.granularity(), MAX_CANDLE_COUNT_OANDA_API);
-      return SUCCESS == onComplete(response.getCandles(), i.outputPath())
+      return SUCCESS == onComplete(response.getCandles(), i.outputPath(), lastTime)
           ? NEW_GET_5K_CANDLES
           : ERROR;
-    } else {
-      var lastTimePlusGranularity = Instant.parse(i.dateTime().format(YMDHMS_FORMATTER))
-          .plus(granularityToSeconds(i.granularity()), SECONDS);
-
-      if (isNextCandleComplete(i.instrument(), i.granularity(), lastTimePlusGranularity)) {
-        GetCandlesResponse response = null;
-        try {
-          response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
-        } catch (Exception e) {
-          var msg = "\nError while trying to get candles from time for %s".formatted(i.instrument());
-          log.error(msg);
-          logFileService.logToFile(msg);
-          return ERROR;
-        }
-        if (response.getCandles().isEmpty()) {
-          return NO_NEW_CANDLES;
-        }
-        return onComplete(response.getCandles(), i.outputPath());
-      }
-      return NEXT_CANDLE_NOT_COMPLETE;
+    } catch (Exception e) {
+      var msg = "\nError while trying to get candles from COUNT for %s".formatted(i.instrument());
+      log.error(msg);
+      logFileService.logToFile(msg);
+      return ERROR;
     }
   }
 
@@ -172,11 +186,12 @@ public class CandlestickService {
     return oandaRestResource.getCandlesWithCount(instrument, granularity, count);
   }
 
-  private EGetCandlesState onComplete(List<Candlestick> candles, String filePath) {
+  private EGetCandlesState onComplete(List<Candlestick> candles, String filePath, Instant lastTime) {
     var candlesArray = candles
         .stream()
         .filter(Candlestick::getComplete)
         .map(candlestickMapper::oandaCandleToCsvCandle)
+        .filter(c -> c.getTime().toInstant().isAfter(lastTime))
         .toArray(CsvCandle[]::new);
 
     try {
