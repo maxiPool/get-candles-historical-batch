@@ -127,7 +127,9 @@ public class CandlestickService {
         try {
           response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
         } catch (Exception e) {
-          log.error("Error while trying to get candles from time for {}", i.instrument());
+          var msg = "\nError while trying to get candles from time for %s".formatted(i.instrument());
+          log.error(msg);
+          logFileService.logToFile(msg);
           return ERROR;
         }
         if (response.getCandles().isEmpty()) {

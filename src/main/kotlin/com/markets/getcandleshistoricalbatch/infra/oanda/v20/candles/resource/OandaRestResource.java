@@ -1,6 +1,7 @@
 package com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.resource;
 
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.config.OandaRestFeignConfig;
+import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.model.GetInstrumentListResponse;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.EInstrument;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.GetCandlesResponse;
 import com.oanda.v20.instrument.CandlestickGranularity;
@@ -11,7 +12,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
     name = "oandaFeignClient",
-    url = "${infra.oanda.v20.devRestUrl}",
+//    url = "${infra.oanda.v20.devRestUrl}",
+    url = "${infra.oanda.v20.prodRestUrl}",
     configuration = OandaRestFeignConfig.class
 )
 public interface OandaRestResource {
@@ -31,5 +33,11 @@ public interface OandaRestResource {
   GetCandlesResponse getCandlesWithCount(@PathVariable("instrument") EInstrument instrument,
                                          @RequestParam(GRANULARITY) CandlestickGranularity granularity,
                                          @RequestParam(COUNT) int count);
+
+  /**
+   * Get the list of tradeable instruments for the given account.
+   */
+  @GetMapping("/v3/accounts/{accountId}/instruments")
+  GetInstrumentListResponse getInstruments(@PathVariable("accountId") String accountId);
 
 }
