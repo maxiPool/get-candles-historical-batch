@@ -24,13 +24,13 @@ public interface OandaRestResource {
   String COUNT = "count";
 
   @GetMapping("/v3/instruments/{instrument}/candles")
-  GetCandlesResponse getCandlesFromTo(@PathVariable("instrument") EInstrument instrument,
+  GetCandlesResponse getCandlesFromTo(@PathVariable("instrument") String instrument,
                                       @RequestParam(GRANULARITY) CandlestickGranularity granularity,
                                       @RequestParam(FROM) String from,
                                       @RequestParam(TO) String to);
 
   @GetMapping("/v3/instruments/{instrument}/candles")
-  GetCandlesResponse getCandlesWithCount(@PathVariable("instrument") EInstrument instrument,
+  GetCandlesResponse getCandlesWithCount(@PathVariable("instrument") String instrument,
                                          @RequestParam(GRANULARITY) CandlestickGranularity granularity,
                                          @RequestParam(COUNT) int count);
 

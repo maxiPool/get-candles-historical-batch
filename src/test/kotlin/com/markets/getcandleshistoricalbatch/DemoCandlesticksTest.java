@@ -1,9 +1,9 @@
 package com.markets.getcandleshistoricalbatch;
 
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService;
-import com.markets.getcandleshistoricalbatch.infra.oanda.v20.model.EInstrument;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.properties.CandlestickProperties;
 import com.markets.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
+import com.oanda.v20.primitives.Instrument;
 import lombok.extern.slf4j.Slf4j;
 import org.assertj.core.api.SoftAssertions;
 import org.jetbrains.annotations.NotNull;
@@ -44,6 +44,16 @@ public class DemoCandlesticksTest {
   @Autowired
   private CandlestickService candlestickService;
 
+  private final Instrument AU200_AUD, AUD_CAD;
+
+  {
+    AU200_AUD = new Instrument();
+    AUD_CAD = new Instrument();
+
+    AU200_AUD.setName("AU200_AUD");
+    AUD_CAD.setName("AUD_CAD");
+  }
+
   @BeforeEach
   void beforeEach() {
     when(v20Properties.candlestick())
@@ -62,7 +72,7 @@ public class DemoCandlesticksTest {
   @Test
   void should_getCandlesForAU200_AUD_15M_whenFileExists_andUsingCountEndpoint() {
     var candleRequestInfo =
-        candlestickService.getRequestInfoList(List.of(EInstrument.AU200_AUD), List.of(M15)).get(0);
+        candlestickService.getRequestInfoList(List.of(AU200_AUD), List.of(M15)).get(0);
     candlestickService.getCandlesFor(candleRequestInfo);
   }
 
@@ -70,7 +80,7 @@ public class DemoCandlesticksTest {
   void should_getCandlesForAU200_AUD_15M_whenFileExists() {
     var soft = new SoftAssertions();
     var candleRequestInfoWithoutFile =
-        candlestickService.getRequestInfoList(List.of(EInstrument.AU200_AUD), List.of(M15)).get(0);
+        candlestickService.getRequestInfoList(List.of(AU200_AUD), List.of(M15)).get(0);
     var path = Paths.get(candleRequestInfoWithoutFile.outputPath());
     var pathSrc = Paths.get(candleRequestInfoWithoutFile.outputPath().replace(".csv", "-src.csv"));
     tryCopy(pathSrc, path);
@@ -78,7 +88,7 @@ public class DemoCandlesticksTest {
     var nbOfLines = tryReadAllLines(path).size();
 
     var candleRequestInfo =
-        candlestickService.getRequestInfoList(List.of(EInstrument.AU200_AUD), List.of(M15)).get(0);
+        candlestickService.getRequestInfoList(List.of(AU200_AUD), List.of(M15)).get(0);
     candlestickService.getCandlesFor(candleRequestInfo);
 
     var nbOfLinesAfter = tryReadAllLines(path).size();
@@ -93,7 +103,7 @@ public class DemoCandlesticksTest {
   void should_getCandlesForAUDCAD_15M_whenFileExistsDoesntExist() {
     var soft = new SoftAssertions();
     var candleRequestInfo =
-        candlestickService.getRequestInfoList(List.of(EInstrument.AUD_CAD), List.of(M15)).get(0);
+        candlestickService.getRequestInfoList(List.of(AUD_CAD), List.of(M15)).get(0);
     var path = Paths.get(candleRequestInfo.outputPath());
     var fileExists = Files.exists(path);
 
@@ -113,7 +123,7 @@ public class DemoCandlesticksTest {
   void should_getCandlesticksFromOandaAPIWithCandleCount() {
     var soft = new SoftAssertions();
 
-    var resp = candlestickService.getCandlestickWithCount(USD_CAD, M15, 5);
+    var resp = candlestickService.getCandlestickWithCount("USD_CAD", M15, 5);
 
     soft.assertThat(resp.getGranularity()).isEqualTo(M15);
     soft.assertThat(resp.getInstrument()).isEqualTo(USD_CAD.toString());
