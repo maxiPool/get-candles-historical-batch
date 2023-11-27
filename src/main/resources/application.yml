@@ -30,3 +30,12 @@ infra:
       prodStreamUrl: "https://stream-fxtrade.oanda.com"
       devRestUrl: "https://api-fxpractice.oanda.com"
       prodRestUrl: "https://api-fxtrade.oanda.com"
+      isProduction: false
+      candlestick:
+        enabled: true
+        outputPathTemplate: "F:\\candles\\%s-candles-%s.csv"
+
+app:
+  disableOnDays:
+    - SATURDAY
+    - SUNDAY
