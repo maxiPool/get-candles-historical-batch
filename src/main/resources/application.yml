@@ -5,10 +5,11 @@ info:
       version: "@spring-boot.version@"
 
 spring:
-  main:
-    allow-bean-definition-overriding: false
   application:
     name: @project.artifactId@
+  main:
+    allow-bean-definition-overriding: false
+  threads.virtual.enabled: true
 
   jackson:
     property-naming-strategy: LOWER_CAMEL_CASE
