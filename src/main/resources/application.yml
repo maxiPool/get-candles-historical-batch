@@ -5,6 +5,8 @@ info:
       version: "@spring-boot.version@"
 
 spring:
+  threads.virtual.enabled: true
+
   main:
     allow-bean-definition-overriding: false
   application:
@@ -36,5 +38,5 @@ infra:
 
 app:
   disableOnDays:
-    - SATURDAY
+#    - SATURDAY
     - SUNDAY
