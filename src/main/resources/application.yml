@@ -38,5 +38,5 @@ infra:
 
 app:
   disableOnDays:
-#    - SATURDAY
+    - SATURDAY
     - SUNDAY
