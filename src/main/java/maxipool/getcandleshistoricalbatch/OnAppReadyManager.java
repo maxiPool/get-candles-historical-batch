@@ -1,15 +1,22 @@
 package maxipool.getcandleshistoricalbatch;
 
-import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService;
-import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService;
+import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+
+import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.WRITE;
 
 
 @Component
@@ -45,7 +52,26 @@ public class OnAppReadyManager {
 
   private void candles() {
     if (v20Properties.candlestick().enabled()) {
-      candlestickService.runGetNextCandlesBatch();
+      preventDuplicateRun(candlestickService::runGetNextCandlesBatch);
+    }
+  }
+
+  @Value("${app.lock-file-path}")
+  private String lockFilePath;
+
+  private void preventDuplicateRun(Runnable runnable) {
+    try (var channel = FileChannel.open(new File(lockFilePath).toPath(), CREATE, WRITE);
+         var lock = channel.tryLock()
+    ) {
+      if (lock != null) {
+        log.info("Lock File acquired, script execution started...");
+        runnable.run();
+        log.info("Script execution completed.");
+      } else {
+        log.info("Another instance of the script is already running. Exiting gracefully.");
+      }
+    } catch (IOException e) {
+      log.error("", e);
     }
   }
 
