@@ -6,12 +6,13 @@ import lombok.Builder;
 import lombok.With;
 
 import java.time.ZonedDateTime;
+import java.util.List;
 
 @Builder
 @With
 public record InstrumentCandleRequestInfo(Instrument instrument,
                                           CandlestickGranularity granularity,
-                                          String outputPath,
+                                          List<String> outputPaths,
                                           String lastLine,
                                           ZonedDateTime dateTime) {
 }

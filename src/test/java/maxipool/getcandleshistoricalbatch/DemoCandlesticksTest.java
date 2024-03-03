@@ -1,11 +1,11 @@
 package maxipool.getcandleshistoricalbatch;
 
+import com.oanda.v20.primitives.Instrument;
 import jakarta.validation.constraints.NotNull;
+import lombok.extern.slf4j.Slf4j;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.CandlestickProperties;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
-import com.oanda.v20.primitives.Instrument;
-import lombok.extern.slf4j.Slf4j;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -22,10 +22,10 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 
-import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService.MAX_CANDLE_COUNT_OANDA_API;
-import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.model.EInstrument.USD_CAD;
 import static com.oanda.v20.instrument.CandlestickGranularity.M15;
 import static java.util.Collections.emptyList;
+import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService.MAX_CANDLE_COUNT_OANDA_API;
+import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.model.EInstrument.USD_CAD;
 import static org.mockito.Mockito.when;
 
 
@@ -33,7 +33,7 @@ import static org.mockito.Mockito.when;
 @Slf4j
 @SpringBootTest
 @ActiveProfiles({"local"})
-public class DemoCandlesticksTest {
+class DemoCandlesticksTest {
 
   @MockBean
   private OnAppReadyManager onAppReadyManager;
@@ -60,7 +60,7 @@ public class DemoCandlesticksTest {
         .thenReturn(CandlestickProperties
             .builder()
             .enabled(true)
-            .outputPathTemplate("src\\test\\resources\\outputFiles\\%s-candles-%s.csv")
+            .outputPathTemplates(List.of("src\\test\\resources\\outputFiles\\%s-candles-%s.csv"))
             .build());
   }
 
@@ -81,8 +81,8 @@ public class DemoCandlesticksTest {
     var soft = new SoftAssertions();
     var candleRequestInfoWithoutFile =
         candlestickService.getRequestInfoList(List.of(AU200_AUD), List.of(M15)).get(0);
-    var path = Paths.get(candleRequestInfoWithoutFile.outputPath());
-    var pathSrc = Paths.get(candleRequestInfoWithoutFile.outputPath().replace(".csv", "-src.csv"));
+    var path = Paths.get(candleRequestInfoWithoutFile.outputPaths().get(0));
+    var pathSrc = Paths.get(candleRequestInfoWithoutFile.outputPaths().get(0).replace(".csv", "-src.csv"));
     tryCopy(pathSrc, path);
     var fileExists = Files.exists(path);
     var nbOfLines = tryReadAllLines(path).size();
@@ -104,7 +104,7 @@ public class DemoCandlesticksTest {
     var soft = new SoftAssertions();
     var candleRequestInfo =
         candlestickService.getRequestInfoList(List.of(AUD_CAD), List.of(M15)).get(0);
-    var path = Paths.get(candleRequestInfo.outputPath());
+    var path = Paths.get(candleRequestInfo.outputPaths().get(0));
     var fileExists = Files.exists(path);
 
     candlestickService.getCandlesFor(candleRequestInfo);
