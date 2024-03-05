@@ -22,8 +22,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -36,6 +34,7 @@ import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor;
 import static java.util.stream.Collectors.*;
 import static maxipool.getcandleshistoricalbatch.common.csv.CsvUtil.*;
+import static maxipool.getcandleshistoricalbatch.common.file.CopyFileUtil.copyToSecondDisk;
 import static maxipool.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.writeToFileThatDoesntExist;
@@ -65,6 +64,8 @@ public class CandlestickService {
     // Get request info list will now have different data since the files are being read to create the request info object
     // and getCandlesForMany just modified the files.
     logLastCandleTimesBreakdown(getRequestInfoList(instruments, granularityList));
+
+    copyToSecondDisk(v20Properties.candlestick());
   }
 
   public void logLastCandleTimesBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
@@ -89,7 +90,7 @@ public class CandlestickService {
         .stream()
         .map(i -> supplyAsync(() -> getCandlesFor(i), newVirtualThreadPerTaskExecutor()))
         .collect(collectingAndThen(toList(),
-            fs -> fs.stream().map(CompletableFuture::join).map(i -> i.orElse(null)).filter(Objects::nonNull).toList()));
+            fs -> fs.stream().map(CompletableFuture::join).toList()));
 
     logGetCandlesFromApiBreakdown(instrumentCandleRequestInfoList, getCandlesStates);
   }
@@ -116,23 +117,18 @@ public class CandlestickService {
   /**
    * Gets the candles for the instrument and appends them to the output path defined in configuration.
    */
-  public Optional<EGetCandlesState> getCandlesFor(InstrumentCandleRequestInfo i) {
-    return i.outputPaths()
-        .stream()
-        .map(outputPath -> {
-          if (Files.notExists(Paths.get(outputPath))) {
-            return getWithCount(i, outputPath, Instant.MIN);
-          }
-          var lastTime = Instant.parse(i.dateTime().format(YMDHMS_FORMATTER));
-          var lastTimePlusGranularity = lastTime.plus(granularityToSeconds(i.granularity()), SECONDS);
+  public EGetCandlesState getCandlesFor(InstrumentCandleRequestInfo i) {
+    if (Files.notExists(Paths.get(i.outputPath()))) {
+      return getWithCount(i, i.outputPath(), Instant.MIN);
+    }
+    var lastTime = Instant.parse(i.dateTime().format(YMDHMS_FORMATTER));
+    var lastTimePlusGranularity = lastTime.plus(granularityToSeconds(i.granularity()), SECONDS);
 
-          if (!isNextCandleComplete(i.instrument(), i.granularity(), lastTimePlusGranularity)) {
-            return NEXT_CANDLE_NOT_COMPLETE;
-          }
+    if (!isNextCandleComplete(i.instrument(), i.granularity(), lastTimePlusGranularity)) {
+      return NEXT_CANDLE_NOT_COMPLETE;
+    }
 
-          return getCandlesState(i, outputPath, lastTimePlusGranularity, lastTime);
-        })
-        .reduce((a, b) -> a);
+    return getCandlesState(i, i.outputPath(), lastTimePlusGranularity, lastTime);
   }
 
   private EGetCandlesState getCandlesState(InstrumentCandleRequestInfo i, String outputPath, Instant lastTimePlusGranularity, Instant lastTime) {
@@ -227,12 +223,8 @@ public class CandlestickService {
   }
 
   private InstrumentCandleRequestInfo getRequestInfo(Instrument i, CandlestickGranularity g) {
-    var outputPaths = v20Properties
-        .candlestick()
-        .outputPathTemplates().stream()
-        .map(it -> it.formatted(i.getName().toString(), g))
-        .toList();
-    var lastLine = getLastLineFromCsvCandleFile(outputPaths.get(0));
+    var outputPath = getOutputPath(i, g, v20Properties.candlestick().outputPathTemplate());
+    var lastLine = getLastLineFromCsvCandleFile(outputPath);
     var maybeCandle = csvStringWithoutHeaderToCsvCandlePojo(lastLine);
     var dateTime = ofNullable(maybeCandle)
         .map(CsvCandle::getTime)
@@ -242,10 +234,14 @@ public class CandlestickService {
         .builder()
         .granularity(g)
         .instrument(i)
-        .outputPaths(outputPaths)
+        .outputPath(outputPath)
         .lastLine(lastLine)
         .dateTime(dateTime)
         .build();
+  }
+
+  private String getOutputPath(Instrument i, CandlestickGranularity g, String outputPathTemplate) {
+    return outputPathTemplate.formatted(i.getName().toString(), g);
   }
 
   private static long granularityToSeconds(CandlestickGranularity granularity) {

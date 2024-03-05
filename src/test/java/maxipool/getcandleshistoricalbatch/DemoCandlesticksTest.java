@@ -60,7 +60,7 @@ class DemoCandlesticksTest {
         .thenReturn(CandlestickProperties
             .builder()
             .enabled(true)
-            .outputPathTemplates(List.of("src\\test\\resources\\outputFiles\\%s-candles-%s.csv"))
+            .outputPathTemplate("src\\test\\resources\\outputFiles\\%s-candles-%s.csv")
             .build());
   }
 
@@ -81,8 +81,8 @@ class DemoCandlesticksTest {
     var soft = new SoftAssertions();
     var candleRequestInfoWithoutFile =
         candlestickService.getRequestInfoList(List.of(AU200_AUD), List.of(M15)).get(0);
-    var path = Paths.get(candleRequestInfoWithoutFile.outputPaths().get(0));
-    var pathSrc = Paths.get(candleRequestInfoWithoutFile.outputPaths().get(0).replace(".csv", "-src.csv"));
+    var path = Paths.get(candleRequestInfoWithoutFile.outputPath());
+    var pathSrc = Paths.get(candleRequestInfoWithoutFile.outputPath().replace(".csv", "-src.csv"));
     tryCopy(pathSrc, path);
     var fileExists = Files.exists(path);
     var nbOfLines = tryReadAllLines(path).size();
@@ -104,7 +104,7 @@ class DemoCandlesticksTest {
     var soft = new SoftAssertions();
     var candleRequestInfo =
         candlestickService.getRequestInfoList(List.of(AUD_CAD), List.of(M15)).get(0);
-    var path = Paths.get(candleRequestInfo.outputPaths().get(0));
+    var path = Paths.get(candleRequestInfo.outputPath());
     var fileExists = Files.exists(path);
 
     candlestickService.getCandlesFor(candleRequestInfo);

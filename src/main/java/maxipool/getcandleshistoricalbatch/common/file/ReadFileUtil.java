@@ -20,7 +20,7 @@ public class ReadFileUtil {
       log.info("File doesn't exist: {}", fileName);
       return null;
     }
-    try (RandomAccessFile file = new RandomAccessFile(fileName, "r")) {
+    try (var file = new RandomAccessFile(fileName, "r")) {
       var fileLength = file.length();
       if (fileLength == 0) {
         return null;
@@ -66,7 +66,7 @@ public class ReadFileUtil {
    * <br />
    * 13 = CR = \r
    */
-  private static boolean isNewLineChar(int currentByte) {
+  public static boolean isNewLineChar(int currentByte) {
     return currentByte == 10 || currentByte == 13;
   }
 
