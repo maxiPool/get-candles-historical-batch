@@ -80,7 +80,7 @@ public class CandlestickService {
         .map(d -> d.format(YMDHMS_FORMATTER))
         .collect(joining("\n"));
     log.info(message);
-    logToFile("%n%nLast candle times breakdown as of %s%n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), message));
+    logToFile("%n%nLast candle times breakdown as of %s%n%s%n".formatted(ZonedDateTime.now(ZONE_TORONTO), message));
   }
 
   public void getCandlesForMany(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {

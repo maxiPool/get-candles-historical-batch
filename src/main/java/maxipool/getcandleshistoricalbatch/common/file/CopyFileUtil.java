@@ -75,20 +75,20 @@ public class CopyFileUtil {
       }
     }
 
-    logToFile("Done copying files");
+    logToFile("Done copying files\n");
     assertFileLengthsAreEqual(fileNamesFromSourceFolder, srcFolderPath, dstFolderPath);
   }
 
   private static void assertFileLengthsAreEqual(List<String> fileNamesFromSourceFolder, Path srcFolderPath, Path dstFolderPath) {
     log.info("START assertFileLengthsAreEqual");
-    logToFile("START assertFileLengthsAreEqual");
+    logToFile("START assertFileLengthsAreEqual\n");
     fileNamesFromSourceFolder
         .forEach(fileName -> {
           try {
             var dstFile = dstFolderPath.resolve(fileName);
             var srcFile = srcFolderPath.resolve(fileName);
             if (Files.size(dstFile) != Files.size(srcFile)) {
-              var message = "File size not equal for %s".formatted(fileName);
+              var message = "File size not equal for %s%n".formatted(fileName);
               log.warn(message);
               logToFile(message);
             }
@@ -97,7 +97,7 @@ public class CopyFileUtil {
           }
         });
     log.info("DONE assertFileLengthsAreEqual");
-    logToFile("DONE assertFileLengthsAreEqual");
+    logToFile("DONE assertFileLengthsAreEqual\n");
   }
 
   private static void copyMissingLines(Path dstFile, Path srcFile) throws IOException {
