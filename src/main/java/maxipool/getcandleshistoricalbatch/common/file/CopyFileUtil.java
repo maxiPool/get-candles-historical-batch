@@ -26,6 +26,7 @@ import static java.util.Optional.ofNullable;
 import static maxipool.getcandleshistoricalbatch.common.csv.CsvUtil.csvStringWithoutHeaderToCsvCandlePojo;
 import static maxipool.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static maxipool.getcandleshistoricalbatch.common.file.ReadFileUtil.isNewLineChar;
+import static maxipool.getcandleshistoricalbatch.common.log.LogFileUtil.logToFile;
 
 @Slf4j
 @UtilityClass
@@ -48,13 +49,12 @@ public class CopyFileUtil {
     var fileNamesFromSourceFolder = getSourceFileNames(sourceFolder, props.fileTemplateMatcher());
     var srcFolderPath = Paths.get(sourceFolder);
 
-    try (var exe = Executors.newFixedThreadPool(1)) {
+    try (var exe = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())) {
       var progressCounter = new AtomicInteger(0);
       for (var i = 0; i < fileNamesFromSourceFolder.size(); i++) {
         var finalI = i;
         exe.submit(() -> {
           var fileName = fileNamesFromSourceFolder.get(finalI);
-//          log.info("Start {}", fileName);
           try {
             var dstFile = dstFolderPath.resolve(fileName);
             var srcFile = srcFolderPath.resolve(fileName);
@@ -71,29 +71,33 @@ public class CopyFileUtil {
           if (counter % 20 == 0 || counter >= fileNamesFromSourceFolder.size() - 1) {
             log.info("Copy candles files progress: {}/{}", counter, fileNamesFromSourceFolder.size());
           }
-//          log.info("End {}", fileName);
         });
       }
     }
 
+    logToFile("Done copying files");
     assertFileLengthsAreEqual(fileNamesFromSourceFolder, srcFolderPath, dstFolderPath);
   }
 
   private static void assertFileLengthsAreEqual(List<String> fileNamesFromSourceFolder, Path srcFolderPath, Path dstFolderPath) {
     log.info("START assertFileLengthsAreEqual");
+    logToFile("START assertFileLengthsAreEqual");
     fileNamesFromSourceFolder
         .forEach(fileName -> {
           try {
             var dstFile = dstFolderPath.resolve(fileName);
             var srcFile = srcFolderPath.resolve(fileName);
             if (Files.size(dstFile) != Files.size(srcFile)) {
-              log.warn("File size not equal for {}", fileName);
+              var message = "File size not equal for %s".formatted(fileName);
+              log.warn(message);
+              logToFile(message);
             }
           } catch (IOException e) {
             log.error("Unexpected error while reading file size assertion", e);
           }
         });
     log.info("DONE assertFileLengthsAreEqual");
+    logToFile("DONE assertFileLengthsAreEqual");
   }
 
   private static void copyMissingLines(Path dstFile, Path srcFile) throws IOException {

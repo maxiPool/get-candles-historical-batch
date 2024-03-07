@@ -7,7 +7,6 @@ import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import maxipool.getcandleshistoricalbatch.common.csv.CsvCandle;
-import maxipool.getcandleshistoricalbatch.common.log.LogFileService;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.model.InstrumentCandleRequestInfo;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
@@ -38,6 +37,7 @@ import static maxipool.getcandleshistoricalbatch.common.file.CopyFileUtil.copyTo
 import static maxipool.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.writeToFileThatDoesntExist;
+import static maxipool.getcandleshistoricalbatch.common.log.LogFileUtil.logToFile;
 import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.model.EGetCandlesState.*;
 import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.model.Rfc3339.YMDHMS_FORMATTER;
 
@@ -51,7 +51,6 @@ public class CandlestickService {
   private final InstrumentsService instrumentsService;
   private final OandaRestResource oandaRestResource;
   private final CandlestickMapper candlestickMapper;
-  private final LogFileService logFileService;
   private final V20Properties v20Properties;
 
   public void runGetNextCandlesBatch() {
@@ -81,8 +80,7 @@ public class CandlestickService {
         .map(d -> d.format(YMDHMS_FORMATTER))
         .collect(joining("\n"));
     log.info(message);
-    logFileService.logToFile("%n%nLast candle times breakdown as of %s%n%s"
-        .formatted(ZonedDateTime.now(ZONE_TORONTO), message));
+    logToFile("%n%nLast candle times breakdown as of %s%n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), message));
   }
 
   public void getCandlesForMany(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
@@ -110,8 +108,8 @@ public class CandlestickService {
     var msg2 = "Breakdown: %s".formatted(getCandlesStates.stream().collect(groupingBy(s -> s, counting())));
     log.info(msg1);
     log.info(msg2);
-    logFileService.logToFile("%s%n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), msg1));
-    logFileService.logToFile("%n%n%s%n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), msg2));
+    logToFile("%s%n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), msg1));
+    logToFile("%n%n%s%n%s".formatted(ZonedDateTime.now(ZONE_TORONTO), msg2));
   }
 
   /**
@@ -140,7 +138,7 @@ public class CandlestickService {
     } catch (Exception e) {
       var msg = "%nError while trying to get candles from time for %s; will try getting it using count".formatted(i.instrument());
       log.error(msg);
-      logFileService.logToFile(msg);
+      logToFile(msg);
       return getWithCount(i, outputPath, lastTime);
     }
   }
@@ -155,7 +153,7 @@ public class CandlestickService {
     } catch (Exception e) {
       var msg = "%nError while trying to get candles from COUNT for %s".formatted(i.instrument());
       log.error(msg);
-      logFileService.logToFile(msg);
+      logToFile(msg);
       return ERROR;
     }
   }
