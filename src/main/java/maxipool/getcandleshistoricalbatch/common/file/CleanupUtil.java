@@ -17,6 +17,7 @@ import static java.util.stream.Collectors.groupingBy;
 import static maxipool.getcandleshistoricalbatch.common.csv.CsvUtil.candlesToCsvWithHeader;
 import static maxipool.getcandleshistoricalbatch.common.file.CopyFileUtil.getSourceFileNames;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.writeToFileThatDoesntExist;
+import static maxipool.getcandleshistoricalbatch.common.log.LogFileUtil.logToFile;
 
 @Slf4j
 public class CleanupUtil {
@@ -29,6 +30,11 @@ public class CleanupUtil {
         .fileTemplateMatcher("-candles-")
         .build();
 
+    cleanup(props);
+  }
+
+  public static void cleanup(CandlestickProperties props) {
+    log.info("Running Cleanup");
     var sourceFolder = props.outputPath();
     var fileNamesFromSourceFolder = getSourceFileNames(sourceFolder, props.fileTemplateMatcher());
     var srcFolderPath = Paths.get(sourceFolder);
@@ -49,14 +55,18 @@ public class CleanupUtil {
                 .filter(i -> i.size() > 1).map(i -> i.get(0).getTime())
                 .toList();
             if (!duplicateTimes.isEmpty()) {
-              log.warn("instrument {} has {} duplicates: {}",
+              var instrumentHasDuplicates = "instrument %s has %d duplicates: %s".formatted(
                   fileName, duplicateTimes.size(), duplicateTimes.stream().limit(5).toList());
+              logToFile(instrumentHasDuplicates);
+              log.warn(instrumentHasDuplicates);
               var distinctCandles = candles.stream().distinct().toArray(CsvCandle[]::new);
               var csvWithHeader = candlesToCsvWithHeader(distinctCandles);
               Files.deleteIfExists(path);
               writeToFileThatDoesntExist(path, csvWithHeader);
             } else if (candles.size() < lines.size() - 1) {
-              log.warn("there are candles that were not deserializable for {}", fileName);
+              var candlesNotDeserializable = "there are candles that were not deserializable for %s".formatted(fileName);
+              log.warn(candlesNotDeserializable);
+              logToFile(candlesNotDeserializable);
               var csvWithHeader = candlesToCsvWithHeader(candles.stream().distinct().toArray(CsvCandle[]::new));
               Files.deleteIfExists(path);
               writeToFileThatDoesntExist(path, csvWithHeader);
@@ -67,6 +77,7 @@ public class CleanupUtil {
         });
       }
     }
+    log.info("Cleanup Done");
   }
 
   private static List<CsvCandle> getCandles(String fileName, List<String> lines) {
@@ -77,7 +88,7 @@ public class CleanupUtil {
           .map(CsvUtil::csvStringWithoutHeaderToCsvCandlePojo)
           .filter(Objects::nonNull)
           .filter(i -> ObjectUtils.allNotNull(i.getTime(), i.getOpen(), i.getHigh(), i.getLow(), i.getClose(), i.getVolume(), i.getIsComplete()))
-//          .sorted()
+          .sorted()
           .toList();
     } else {
       return lines
@@ -85,7 +96,7 @@ public class CleanupUtil {
           .skip(1)
           .map(CsvUtil::csvStringWithoutHeaderToCsvCandlePojo)
           .takeWhile(Objects::nonNull)
-//          .sorted()
+          .sorted()
           .toList();
     }
   }

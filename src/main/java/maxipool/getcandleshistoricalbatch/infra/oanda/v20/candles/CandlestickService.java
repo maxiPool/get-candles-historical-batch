@@ -33,6 +33,7 @@ import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor;
 import static java.util.stream.Collectors.*;
 import static maxipool.getcandleshistoricalbatch.common.csv.CsvUtil.*;
+import static maxipool.getcandleshistoricalbatch.common.file.CleanupUtil.cleanup;
 import static maxipool.getcandleshistoricalbatch.common.file.CopyFileUtil.copyToSecondDisk;
 import static maxipool.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
@@ -65,6 +66,7 @@ public class CandlestickService {
     logLastCandleTimesBreakdown(getRequestInfoList(instruments, granularityList));
 
     copyToSecondDisk(v20Properties.candlestick());
+    cleanup(v20Properties.candlestick());
   }
 
   public void logLastCandleTimesBreakdown(List<InstrumentCandleRequestInfo> instrumentCandleRequestInfoList) {
