@@ -20,7 +20,8 @@ import java.time.ZonedDateTime;
     "volume",
     "isComplete"
 })
-public class CsvCandle {
+@EqualsAndHashCode(of = "time")
+public class CsvCandle implements Comparable<CsvCandle> {
 
   @JsonProperty("time")
   private ZonedDateTime time;
@@ -43,4 +44,8 @@ public class CsvCandle {
   @JsonProperty("isComplete")
   private Integer isComplete;
 
+  @Override
+  public int compareTo(CsvCandle o) {
+    return time.compareTo(o.getTime());
+  }
 }

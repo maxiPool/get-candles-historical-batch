@@ -132,7 +132,7 @@ public class CopyFileUtil {
         .orElseThrow(() -> new IllegalStateException("There should be a candle!"));
   }
 
-  private static List<String> getSourceFileNames(String sourceFolder, String fileTemplate) {
+  public static List<String> getSourceFileNames(String sourceFolder, String fileTemplate) {
     try (var directoryStream = Files.newDirectoryStream(Paths.get(sourceFolder))) {
       var results = new ArrayList<String>();
       for (var path : directoryStream) {

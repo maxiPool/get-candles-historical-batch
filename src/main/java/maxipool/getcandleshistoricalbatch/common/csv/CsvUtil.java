@@ -1,6 +1,7 @@
 package maxipool.getcandleshistoricalbatch.common.csv;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import com.fasterxml.jackson.dataformat.csv.CsvSchema;
@@ -16,6 +17,7 @@ public class CsvUtil {
   private static final CsvMapper csvMapper;
   private static final CsvSchema csvSchemaWithHeader;
   private static final CsvSchema csvSchemaWithoutHeader;
+  public static final ObjectReader READER;
 
   static {
     csvMapper = new CsvMapper();
@@ -29,6 +31,10 @@ public class CsvUtil {
     csvSchemaWithoutHeader = csvMapper
         .schemaFor(CsvCandle.class)
         .withoutHeader();
+
+    READER = csvMapper
+        .readerFor(CsvCandle.class)
+        .with(csvSchemaWithoutHeader);
   }
 
   public static CsvCandle csvStringWithoutHeaderToCsvCandlePojo(String csvString) {
@@ -36,12 +42,9 @@ public class CsvUtil {
       return null;
     }
     try {
-      return csvMapper
-          .readerFor(CsvCandle.class)
-          .with(csvSchemaWithoutHeader)
-          .readValue(csvString);
-    } catch (JsonProcessingException e) {
-      log.error("Error while converting candle to csv", e);
+      return READER.readValue(csvString);
+    } catch (Exception e) {
+      log.warn("Error while converting candle to csv {}", e.getMessage());
     }
     return null;
   }
