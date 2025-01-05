@@ -9,14 +9,18 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
+import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
-import static java.nio.file.StandardOpenOption.CREATE;
+import static java.lang.Boolean.TRUE;
+import static java.nio.file.StandardOpenOption.READ;
 import static java.nio.file.StandardOpenOption.WRITE;
+import static java.time.Instant.now;
+import static java.time.Instant.ofEpochSecond;
+import static java.time.temporal.ChronoUnit.HOURS;
 
 
 @Component
@@ -51,7 +55,7 @@ public class OnAppReadyManager {
   }
 
   private void candles() {
-    if (v20Properties.candlestick().enabled()) {
+    if (TRUE.equals(v20Properties.candlestick().enabled())) {
       preventDuplicateRun(candlestickService::runGetNextCandlesBatch);
     }
   }
@@ -60,18 +64,54 @@ public class OnAppReadyManager {
   private String lockFilePath;
 
   private void preventDuplicateRun(Runnable runnable) {
-    try (var channel = FileChannel.open(new File(lockFilePath).toPath(), CREATE, WRITE);
-         var lock = channel.tryLock()
-    ) {
+    try (var channel = FileChannel.open(new File(lockFilePath).toPath(), READ, WRITE);
+         var lock = channel.tryLock()) {
+
       if (lock != null) {
-        log.info("Lock File acquired, script execution started...");
+        log.info("Lock File acquired, checking last run timestamp...");
+
+        var lastTimestamp = readTimestampFromFile(channel);
+        var currentTime = now().getEpochSecond();
+
+        if (lastTimestamp != 0 && HOURS.between(ofEpochSecond(lastTimestamp), now()) < 1) {
+          log.info("The script was run less than an hour ago. Exiting gracefully.");
+          return;
+        }
+
+        log.info("Proceeding with script execution...");
         runnable.run();
-        log.info("Script execution completed.");
+
+        writeTimestampToFile(channel, currentTime);
+        log.info("Script execution completed and timestamp updated.");
       } else {
         log.info("Another instance of the script is already running. Exiting gracefully.");
       }
     } catch (IOException e) {
-      log.error("", e);
+      log.error("Error handling the lock file.", e);
+    }
+  }
+
+  private static long readTimestampFromFile(FileChannel channel) {
+    try {
+      channel.position(0);
+      var reader = new BufferedReader(new InputStreamReader(Channels.newInputStream(channel)));
+      var line = reader.readLine();
+      return (line != null && !line.isBlank()) ? Long.parseLong(line) : 0;
+    } catch (IOException | NumberFormatException e) {
+      log.warn("Failed to read timestamp from file. Assuming no recent run.", e);
+      return 0;
+    }
+  }
+
+  private static void writeTimestampToFile(FileChannel channel, long timestamp) {
+    try {
+      channel.position(0);
+      channel.truncate(0); // Clear the file before writing
+      var writer = new BufferedWriter(new OutputStreamWriter(Channels.newOutputStream(channel)));
+      writer.write(Long.toString(timestamp));
+      writer.flush();
+    } catch (IOException e) {
+      log.error("Failed to write timestamp to file.", e);
     }
   }
 

@@ -52,7 +52,7 @@ public class CleanupUtil {
                 .stream()
                 .collect(groupingBy(CsvCandle::getTime))
                 .values().stream()
-                .filter(i -> i.size() > 1).map(i -> i.get(0).getTime())
+                .filter(i -> i.size() > 1).map(i -> i.getFirst().getTime())
                 .toList();
             if (!duplicateTimes.isEmpty()) {
               var instrumentHasDuplicates = "instrument %s has %d duplicates: %s".formatted(
