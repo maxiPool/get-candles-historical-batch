@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.2</version>
+      <version>3.4.1</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
@@ -17,15 +17,14 @@
 
     <properties>
         <java.version>21</java.version>
-        <jackson.version>2.14.2</jackson.version>
+      <jackson.version>2.18.2</jackson.version>
         <v20.version>3.0.25</v20.version>
-        <spring-cloud-openfeign.version>4.1.0</spring-cloud-openfeign.version>
-        <mapstruct.version>1.5.3.Final</mapstruct.version>
-        <maven-compiler-plugin.version>3.8.1</maven-compiler-plugin.version>
-        <maven-jar-plugin.version>3.2.2</maven-jar-plugin.version>
-        <databind.version>2.7.4</databind.version>
-        <lombok.version>1.18.30</lombok.version>
-        <jakarta.validation-api.version>3.0.2</jakarta.validation-api.version>
+      <spring-cloud-openfeign.version>4.2.0</spring-cloud-openfeign.version>
+      <mapstruct.version>1.6.3</mapstruct.version>
+      <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+      <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
+      <lombok.version>1.18.36</lombok.version>
+      <jakarta.validation-api.version>3.1.0</jakarta.validation-api.version>
     </properties>
 
     <dependencies>
