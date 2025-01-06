@@ -16,18 +16,26 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static com.oanda.v20.instrument.CandlestickGranularity.M1;
 import static com.oanda.v20.instrument.CandlestickGranularity.M15;
 import static java.time.temporal.ChronoUnit.MINUTES;
 import static java.time.temporal.ChronoUnit.SECONDS;
+import static java.util.Map.entry;
 import static java.util.Optional.ofNullable;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor;
@@ -49,21 +57,238 @@ public class CandlestickService {
   public static final int MAX_CANDLE_COUNT_OANDA_API = 5_000;
   public static final ZoneId ZONE_TORONTO = ZoneId.of("America/Toronto");
 
+  private static final List<CandlestickGranularity> GRANULARITY_LIST = List.of(M15, M1);
+  private static final Pattern YYYY_MM_REGEXP = Pattern.compile("-(\\d{4})_(\\d{2})\\.csv$");
+
   private final InstrumentsService instrumentsService;
   private final OandaRestResource oandaRestResource;
   private final CandlestickMapper candlestickMapper;
   private final V20Properties v20Properties;
 
-  public void runGetNextCandlesBatch() {
-    log.info("Launching get candles historical data batch job");
-    var granularityList = List.of(M15, M1);
+  /**
+   * @param instrument
+   * @param granularity
+   */
+  private record IG(String instrument, CandlestickGranularity granularity) {
+    @Override
+    public String toString() {
+      return "%s-%s".formatted(instrument, granularity);
+    }
+  }
 
+  public void runV2() {
     var instruments = instrumentsService.findAll();
     log.info("Found {} instruments on Oanda", instruments.size());
-    getCandlesForMany(getRequestInfoList(instruments, granularityList));
+
+    var latestFilesByInstrumentAndGranularity = getLatestFilesByInstrumentAndGranularity(instruments);
+
+    var result = latestFilesByInstrumentAndGranularity
+        .entrySet().stream()
+        .map(e -> e
+            .getValue()
+            .map(p -> entry(e.getKey(), handleExistingFile(e.getKey(), p)))
+            .orElseGet(() -> entry(e.getKey(), handleNoExistingFile(e.getKey()))))
+        .collect(toMap(Entry::getKey, Entry::getValue));
+
+    var failedIgs = result.entrySet().stream().filter(i -> !i.getValue()).map(Entry::getKey).map(IG::toString).toList();
+    if (!failedIgs.isEmpty()) {
+      log.info("Failed to update data for:%n\t{}", String.join("%n\t", failedIgs));
+    }
+  }
+
+  private Map<IG, Optional<Path>> getLatestFilesByInstrumentAndGranularity(List<Instrument> instruments) {
+    return instruments
+        .stream()
+        .map(i -> i.getName().toString())
+        .flatMap(i -> GRANULARITY_LIST.stream().map(g -> new IG(i, g)))
+        // Convert each instrument into a stream of the matching files in its folder
+        .flatMap(ig -> {
+          var instrument = ig.instrument();
+          var granularity = ig.granularity().toString();
+
+          var subDir = Paths.get(v20Properties.candlestick().outputPath(), instrument, granularity);
+          if (!Files.isDirectory(subDir)) {
+            log.warn("No folder for '{}' / '{}'. Skipping.", instrument, granularity);
+            return Stream.empty();
+          }
+
+          try (var files = Files.list(subDir)) {
+            return files
+                .filter(Files::isRegularFile)
+                .filter(path -> isMatchingFile(path, instrument, granularity))
+                .map(path -> entry(ig, path));
+          } catch (IOException e) {
+            log.warn("IOException", e);
+            return Stream.empty();
+          }
+        })
+        // pick the latest file by YearMonth from the filename.
+        .collect(groupingBy(
+            Entry::getKey,
+            maxBy((entry1, entry2) -> {
+              var ym1 = parseYearMonthFromFilename(entry1.getValue().getFileName().toString());
+              var ym2 = parseYearMonthFromFilename(entry2.getValue().getFileName().toString());
+              return ym1.compareTo(ym2);
+            })
+        ))
+        .entrySet().stream()
+        .collect(toMap(Entry::getKey, e -> e.getValue().map(Entry::getValue)));
+  }
+
+  /**
+   * Calls Oanda API to get candles by count and saves them to the corresponding monthly files.
+   */
+  private boolean handleNoExistingFile(IG ig) {
+    var instrument = ig.instrument();
+    var granularity = ig.granularity().toString();
+
+    // Create the subfolder structure if needed
+    var subDir = Paths.get(v20Properties.candlestick().outputPath(), instrument, granularity);
+    try {
+      Files.createDirectories(subDir);
+    } catch (IOException e) {
+      log.warn("Cannot create directory '{}'", subDir, e);
+      return false;
+    }
+
+    var response = (GetCandlesResponse) null;
+    try {
+      response = oandaRestResource.getCandlesWithCount(instrument, ig.granularity, MAX_CANDLE_COUNT_OANDA_API);
+    } catch (Exception e) {
+      var msg = "%nError while trying to get candles from COUNT for %s".formatted(instrument);
+      log.error(msg);
+      logToFile(msg);
+      return false;
+    }
+    var candlesByYM = getCandlesByYM(response);
+
+    // Write each group to <instrument>_<granularity>_YYYY_MM.csv
+    return candlesByYM
+        .entrySet().stream()
+        .map(e -> {
+          var filename = String.format("%s_%s_%04d_%02d.csv",
+              instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
+          var outPath = subDir.resolve(filename);
+          try {
+            writeToFileThatDoesntExist(outPath, candlesToCsvWithHeader(e.getValue()));
+            return true;
+          } catch (IOException ioException) {
+            log.warn("Error while appending candles to file: {}", filename, ioException);
+            return false;
+          }
+        })
+        .reduce(true, (acc, next) -> acc && next);
+  }
+
+  private Map<YearMonth, List<CsvCandle>> getCandlesByYM(GetCandlesResponse response) {
+    return response
+        .getCandles().stream()
+        .filter(Candlestick::getComplete)
+        .map(candlestickMapper::oandaCandleToCsvCandle)
+        .collect(groupingBy(c -> YearMonth.from(c.getTime())));
+  }
+
+  private boolean handleExistingFile(IG ig, Path latestFile) {
+    var instrument = ig.instrument();
+    var granularity = ig.granularity().toString();
+
+    // 1) Get the last timestamp from the last line of `latestFile`
+    var lastLine = getLastLineFromCsvCandleFile(latestFile);
+    var candle = csvStringWithoutHeaderToCsvCandlePojo(lastLine);
+    var lastTime = ofNullable(candle)
+        .flatMap(i -> ofNullable(i.getTime()))
+        .map(i -> Instant.parse(i.format(YMDHMS_FORMATTER)))
+        .map(i -> i.plus(granularityToSeconds(ig.granularity()), SECONDS))
+        .orElse(null);
+    if (lastTime == null) {
+      return false;
+    }
+
+    // 2) Call Oanda from lastTs to now
+    var response = (GetCandlesResponse) null;
+    try {
+      response = getCandlesFromTime(instrument, ig.granularity(), lastTime);
+    } catch (Exception ignored) {
+      var msg = "%nError while trying to get candles from time for %s; will try getting it using count".formatted(instrument);
+      log.error(msg);
+      logToFile(msg);
+      try {
+        response = oandaRestResource.getCandlesWithCount(instrument, ig.granularity, MAX_CANDLE_COUNT_OANDA_API);
+      } catch (Exception ignored2) {
+        var msg2 = "%nError while trying to get candles from COUNT for %s".formatted(instrument);
+        log.error(msg2);
+        logToFile(msg2);
+        return false;
+      }
+    }
+
+    // 3) Group by year/month
+    var candlesByYM = getCandlesByYM(response);
+
+    // 4) For the year/month that matches `latestFile` => we append
+    //    If there's a new year/month => create a new file
+    var latestFileYM = parseYearMonthFromFilename(latestFile.getFileName().toString());
+
+    // Directory: e.g. F:\candles\instrument\granularity
+    var subDir = latestFile.getParent();
+
+    return candlesByYM
+        .entrySet().stream()
+        .map(e -> {
+          var filename = String.format("%s_%s_%04d_%02d.csv",
+              instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
+          var outPath = subDir.resolve(filename);
+
+          try {
+            if (e.getKey().equals(latestFileYM)) {
+              // Same month as the latestFile => append
+              appendStringToFile(outPath, candlesToCsvWithoutHeader(e.getValue()));
+            } else {
+              log.warn("Creating new file: {}", outPath);
+              writeToFileThatDoesntExist(outPath, candlesToCsvWithHeader(e.getValue()));
+            }
+          } catch (IOException ioException) {
+            log.error("Failed writing to {}", outPath, ioException);
+            return false;
+          }
+          return true;
+        })
+        .reduce(true, (acc, next) -> acc && next);
+  }
+
+  /**
+   * Check if filename looks like: instrument-granularity-yyyy_MM.csv
+   * Example: "AUD_CAD-M1-2022_12.csv"
+   */
+  private static boolean isMatchingFile(Path path, String instrument, String granularity) {
+    var fileName = path.getFileName().toString();
+    var regex = String.format("^%s-%s-(\\d{4})_(\\d{2})\\.csv$", instrument, granularity);
+    return fileName.matches(regex);
+  }
+
+  /**
+   * Parse the yyyy_MM portion from a filename like:
+   * "AUD_CAD-M1-2022_12.csv" -> YearMonth.of(2022, 12)
+   */
+  private static YearMonth parseYearMonthFromFilename(String fileName) {
+    var m = YYYY_MM_REGEXP.matcher(fileName);
+    if (m.find()) {
+      int year = Integer.parseInt(m.group(1));
+      int month = Integer.parseInt(m.group(2));
+      return YearMonth.of(year, month);
+    } else {
+      throw new IllegalArgumentException("Filename does not contain valid yyyy_MM: " + fileName);
+    }
+  }
+
+  public void runGetNextCandlesBatch() {
+    log.info("Launching get candles historical data batch job");
+    var instruments = instrumentsService.findAll();
+    log.info("Found {} instruments on Oanda", instruments.size());
+    getCandlesForMany(getRequestInfoList(instruments, GRANULARITY_LIST));
     // Get request info list will now have different data since the files are being read to create the request info object
     // and getCandlesForMany just modified the files.
-    logLastCandleTimesBreakdown(getRequestInfoList(instruments, granularityList));
+    logLastCandleTimesBreakdown(getRequestInfoList(instruments, GRANULARITY_LIST));
 
     copyToSecondDisk(v20Properties.candlestick());
     cleanup(v20Properties.candlestick());
@@ -133,7 +358,7 @@ public class CandlestickService {
 
   private EGetCandlesState getCandlesState(InstrumentCandleRequestInfo i, String outputPath, Instant lastTimePlusGranularity, Instant lastTime) {
     try {
-      var response = getCandlesFromTime(i.instrument(), i.granularity(), lastTimePlusGranularity);
+      var response = getCandlesFromTime(i.instrument().getName().toString(), i.granularity(), lastTimePlusGranularity);
       return response.getCandles().isEmpty()
           ? NO_NEW_CANDLES
           : onComplete(response.getCandles(), outputPath, lastTime);
@@ -160,9 +385,10 @@ public class CandlestickService {
     }
   }
 
-  public GetCandlesResponse getCandlesFromTime(Instrument instrument, CandlestickGranularity granularity, Instant fromTime) {
+  public GetCandlesResponse getCandlesFromTime(String instrument, CandlestickGranularity granularity, Instant fromTime) {
     return oandaRestResource
-        .getCandlesFromTo(instrument.getName().toString(),
+        .getCandlesFromTo(
+            instrument,
             granularity,
             YMDHMS_FORMATTER.format(fromTime),
             YMDHMS_FORMATTER.format(Instant.now().minus(10, SECONDS)));
@@ -225,8 +451,8 @@ public class CandlestickService {
   private InstrumentCandleRequestInfo getRequestInfo(Instrument i, CandlestickGranularity g) {
     var outputPath = getOutputPath(i, g, v20Properties.candlestick().outputPathTemplate());
     var lastLine = getLastLineFromCsvCandleFile(outputPath);
-    var maybeCandle = csvStringWithoutHeaderToCsvCandlePojo(lastLine);
-    var dateTime = ofNullable(maybeCandle)
+    var candle = csvStringWithoutHeaderToCsvCandlePojo(lastLine);
+    var dateTime = ofNullable(candle)
         .map(CsvCandle::getTime)
         .orElse(null);
 

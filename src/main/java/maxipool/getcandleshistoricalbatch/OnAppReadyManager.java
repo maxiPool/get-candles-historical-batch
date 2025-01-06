@@ -56,7 +56,7 @@ public class OnAppReadyManager {
 
   private void candles() {
     if (TRUE.equals(v20Properties.candlestick().enabled())) {
-      preventDuplicateRun(candlestickService::runGetNextCandlesBatch);
+      preventDuplicateRun(candlestickService::runV2);
     }
   }
 

@@ -8,6 +8,7 @@ import org.springframework.lang.Nullable;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @Slf4j
@@ -16,11 +17,16 @@ public class ReadFileUtil {
 
   @Nullable
   public static String getLastLineFromCsvCandleFile(String fileName) {
-    if (!Files.exists(Paths.get(fileName))) {
+    return getLastLineFromCsvCandleFile(Paths.get(fileName));
+  }
+
+  @Nullable
+  public static String getLastLineFromCsvCandleFile(Path fileName) {
+    if (!Files.exists(fileName)) {
       log.info("File doesn't exist: {}", fileName);
       return null;
     }
-    try (var file = new RandomAccessFile(fileName, "r")) {
+    try (var file = new RandomAccessFile(String.valueOf(fileName), "r")) {
       var fileLength = file.length();
       if (fileLength == 0) {
         return null;

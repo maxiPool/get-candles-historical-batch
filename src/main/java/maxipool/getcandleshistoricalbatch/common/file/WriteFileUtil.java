@@ -14,9 +14,12 @@ import java.nio.file.StandardOpenOption;
 public class WriteFileUtil {
 
   public static void appendStringToFile(String filePath, String contentToAppend) throws IOException {
-    var path = Paths.get(filePath);
+    appendStringToFile(Paths.get(filePath), contentToAppend);
+  }
+
+  public static void appendStringToFile(Path filePath, String contentToAppend) throws IOException {
     log.debug("Writing to file: {}", filePath);
-    Files.writeString(path, contentToAppend, StandardOpenOption.APPEND);
+    Files.writeString(filePath, contentToAppend, StandardOpenOption.APPEND);
     log.debug("Done with file: {}", filePath);
   }
 
