@@ -32,6 +32,7 @@ import java.util.stream.Stream;
 import static com.oanda.v20.instrument.CandlestickGranularity.M1;
 import static com.oanda.v20.instrument.CandlestickGranularity.M15;
 import static java.lang.Runtime.getRuntime;
+import static java.time.temporal.ChronoUnit.HOURS;
 import static java.time.temporal.ChronoUnit.SECONDS;
 import static java.util.Map.entry;
 import static java.util.Optional.ofNullable;
@@ -216,6 +217,10 @@ public class CandlestickService {
     if (lastTime == null) {
       log.warn("Not Found: last time for {}", ig);
       return false;
+    }
+    if (Instant.now().minus(1, HOURS).isBefore(lastTime)) {
+      log.info("Skipping {} since last candle was within the last hour", ig);
+      return true;
     }
 
     // 2) Call Oanda from lastTs to now

@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.YearMonth;
@@ -21,12 +22,18 @@ public class MonthlyFilesMigration {
 
   private static final String SRC_PATH = "F:\\candles";
   private static final String DST_PATH = "F:\\candles-monthly";
+  private static final String DST_PATH_COPY = "C:\\Users\\Max\\Documents\\candles-monthly";
+  private static final String LOCK_FILE_NAME = "a_lock_file.txt";
 
   private static final Pattern CANDLE_FILE_REGEXP = Pattern.compile("(.+)-candles-(M1|M15)\\.csv");
 
-  public static void main(String[] args) {
+  public static void main(String[] args) throws IOException {
     log.info("Migration to Monthly Files Starting...");
     var processedCount = new AtomicInteger(0);
+
+    var outDir = Paths.get(DST_PATH);
+    Files.createDirectories(outDir);
+    Files.createFile(outDir.resolve(LOCK_FILE_NAME));
 
     Flux.using(
             () -> Files.list(Paths.get(SRC_PATH)),
@@ -61,7 +68,9 @@ public class MonthlyFilesMigration {
                     }));
 
                 var subDir = Paths.get(DST_PATH, instrument, granularity);
+                var subDirCopy = Paths.get(DST_PATH_COPY, instrument, granularity);
                 Files.createDirectories(subDir);
+                Files.createDirectories(subDirCopy);
 
                 for (var entry : linesByMonth.entrySet()) {
                   var ym = entry.getKey();
@@ -77,6 +86,8 @@ public class MonthlyFilesMigration {
                   );
                   var outFilePath = subDir.resolve(outFileName);
                   Files.write(outFilePath, monthlyLines);
+                  var outFilePathCopy = subDir.resolve(outFileName);
+                  Files.write(outFilePathCopy, monthlyLines);
                   // log.info("Wrote {} lines to {}", monthlyLines.size(), outFilePath);
                 }
 
@@ -97,5 +108,10 @@ public class MonthlyFilesMigration {
 
     log.info("Migration to Monthly Files Complete!");
   }
+
+  // TODO: add tests to confirm that
+  //  all the candles from the source are found in the destination
+  //  the candles are ordered
+  //  there are no duplicate candles (by time)
 
 }
