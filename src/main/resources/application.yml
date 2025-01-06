@@ -32,8 +32,15 @@ infra:
       devRestUrl: "https://api-fxpractice.oanda.com"
       prodRestUrl: "https://api-fxtrade.oanda.com"
       isProduction: false
+      candlestick:
+        enabled: true
+        outputPath: "F:\\candles"
+        outputPathTemplate: "${infra.oanda.v20.candlestick.outputPath}\\%s-candles-%s.csv"
+        copyOutputPath: "C:\\Users\\Max\\Documents\\candles"
+        fileTemplateMatcher: "-candles-"
 
 app:
+  lock-file-path: "F:\\candles\\a_lock_file.txt"
   disableOnDays:
     - SATURDAY
     - SUNDAY
