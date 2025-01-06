@@ -1,0 +1,6 @@
+# Template for application-local.yml
+infra:
+  oanda:
+    v20:
+      token: <add-to-application-local.yml>
+      accountId: <add-to-application-local.yml>
