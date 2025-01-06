@@ -35,12 +35,10 @@ infra:
       candlestick:
         enabled: true
         outputPath: "F:\\candles-monthly"
-        outputPathTemplate: "${infra.oanda.v20.candlestick.outputPath}\\%s\\%s\\%s-candles-%s.csv"
         copyOutputPath: "C:\\Users\\Max\\Documents\\candles-monthly"
-        fileTemplateMatcher: "-candles-"
 
 app:
   lock-file-path: "${infra.oanda.v20.candlestick.outputPath}\\a_lock_file.txt"
   disableOnDays:
     - SATURDAY
-#    - SUNDAY
+    - SUNDAY
