@@ -14,6 +14,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.function.Supplier;
 
 import static java.lang.Boolean.TRUE;
 import static java.nio.file.StandardOpenOption.READ;
@@ -56,14 +57,14 @@ public class OnAppReadyManager {
 
   private void candles() {
     if (TRUE.equals(v20Properties.candlestick().enabled())) {
-      preventDuplicateRun(candlestickService::runV2);
+      preventDuplicateRun(candlestickService::getOandaHistoricalMarketData);
     }
   }
 
   @Value("${app.lock-file-path}")
   private String lockFilePath;
 
-  private void preventDuplicateRun(Runnable runnable) {
+  private void preventDuplicateRun(Supplier<Boolean> resultSupplier) {
     try (var channel = FileChannel.open(new File(lockFilePath).toPath(), READ, WRITE);
          var lock = channel.tryLock()) {
 
@@ -79,9 +80,11 @@ public class OnAppReadyManager {
         }
 
         log.info("Proceeding with script execution...");
-        runnable.run();
+        var result = resultSupplier.get();
 
-        writeTimestampToFile(channel, currentTime);
+        if (TRUE.equals(result)) {
+          writeTimestampToFile(channel, currentTime);
+        }
         log.info("Script execution completed and timestamp updated.");
       } else {
         log.info("Another instance of the script is already running. Exiting gracefully.");

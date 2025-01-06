@@ -60,7 +60,7 @@ public class ReadFileUtil {
   private static boolean isNewLineAndReadByte(RandomAccessFile file, StringBuilder sb, long filePointer) throws IOException {
     file.seek(filePointer);
     var currentByte = file.readByte();
-    if (isNewLineChar(currentByte)) {
+    if (isNewLineChar(currentByte) && !sb.isEmpty()) {
       return true;
     }
     sb.append((char) currentByte);

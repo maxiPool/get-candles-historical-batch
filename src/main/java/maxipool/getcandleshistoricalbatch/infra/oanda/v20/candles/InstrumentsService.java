@@ -1,10 +1,10 @@
 package maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles;
 
-import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
-import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
 import com.oanda.v20.primitives.Instrument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
+import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,8 +22,8 @@ public class InstrumentsService {
       return resource.getInstruments(properties.accountId().toString()).instruments();
     } catch (Exception e) {
       log.error("Error while trying to getInstruments", e);
+      throw e;
     }
-    return null;
   }
 
 }

@@ -40,7 +40,7 @@ infra:
         fileTemplateMatcher: "-candles-"
 
 app:
-  lock-file-path: "F:\\candles\\a_lock_file.txt"
+  lock-file-path: "${infra.oanda.v20.candlestick.outputPath}\\a_lock_file.txt"
   disableOnDays:
     - SATURDAY
 #    - SUNDAY
