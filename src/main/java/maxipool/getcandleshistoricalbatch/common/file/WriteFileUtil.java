@@ -21,10 +21,7 @@ public class WriteFileUtil {
   }
 
   public static void writeToFileThatDoesntExist(String filePath, String content) throws IOException {
-    var path = Paths.get(filePath);
-    log.debug("Writing to file: {}", filePath);
-    Files.writeString(path, content, StandardOpenOption.CREATE_NEW);
-    log.debug("Done with file: {}", filePath);
+    writeToFileThatDoesntExist(Paths.get(filePath), content);
   }
 
   public static void writeToFileThatDoesntExist(Path filePath, String content) throws IOException {
