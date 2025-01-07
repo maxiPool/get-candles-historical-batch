@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.YearMonth;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -28,6 +29,80 @@ public class MonthlyFilesMigration {
   private static final Pattern CANDLE_FILE_REGEXP = Pattern.compile("(.+)-candles-(M1|M15)\\.csv");
 
   public static void main(String[] args) throws IOException {
+    // migrate();
+    testAllCandles();
+  }
+
+  /**
+   * Test to confirm that:
+   * - all the candles from the source are found in the destination
+   * - the candles are ordered
+   * - there are no duplicate candles (by time)
+   */
+  private static void testAllCandles() throws IOException {
+    log.info("Test Migration to Monthly Files Starting...");
+    var processedCount = new AtomicInteger(0);
+
+    Flux.using(
+            () -> Files.list(Paths.get(SRC_PATH)),
+            Flux::fromStream,
+            Stream::close
+        )
+        .filter(Files::isRegularFile)
+        .parallel()
+        .runOn(boundedElastic())
+        .flatMap(path -> {
+          var fileName = path.getFileName().toString();
+          var matcher = CANDLE_FILE_REGEXP.matcher(fileName);
+          if (!matcher.matches()) {
+            log.warn("No match found for filename: {}", fileName);
+            return Mono.empty();
+          }
+
+          var instrument = matcher.group(1);
+          var granularity = matcher.group(2);
+          var subDir = Paths.get(DST_PATH, instrument, granularity);
+
+          var allLines$ = Mono.fromCallable(() -> {
+            var strings = Files.readAllLines(path);
+            strings.removeFirst();
+            return strings;
+          });
+
+          return Flux.using(
+                  () -> Files.list(subDir),
+                  Flux::fromStream,
+                  Stream::close
+              )
+              .filter(Files::isRegularFile)
+              .flatMap(monthlyFile -> Mono.fromCallable(() -> Files.readAllLines(monthlyFile)))
+              .reduce(new ArrayList<String>(), (acc, next) -> {
+                next.removeFirst();
+                acc.addAll(next);
+                return acc;
+              })
+              .zipWith(allLines$)
+              .map(t -> Math.abs(t.getT1().size() - t.getT2().size()) < 10)
+              .doOnNext(i -> {
+                if (!i) {
+                  log.warn("Number of line difference too large for {}!", fileName);
+                }
+              })
+              .onErrorResume(e -> {
+                log.error("Error processing file: {}", fileName, e);
+                return Mono.empty();
+              });
+        })
+        .doOnNext(ignored -> {
+          var current = processedCount.incrementAndGet();
+          if (current % 10 == 0) log.info("Processed {} files", current);
+        })
+        .sequential()
+        // block until done
+        .blockLast();
+  }
+
+  private static void migrate() throws IOException {
     log.info("Migration to Monthly Files Starting...");
     var processedCount = new AtomicInteger(0);
 
@@ -108,10 +183,5 @@ public class MonthlyFilesMigration {
 
     log.info("Migration to Monthly Files Complete!");
   }
-
-  // TODO: add tests to confirm that
-  //  all the candles from the source are found in the destination
-  //  the candles are ordered
-  //  there are no duplicate candles (by time)
 
 }
