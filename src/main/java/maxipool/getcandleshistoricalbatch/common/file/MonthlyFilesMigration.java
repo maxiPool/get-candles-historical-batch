@@ -10,12 +10,14 @@ import java.nio.file.Paths;
 import java.time.YearMonth;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static java.time.format.DateTimeFormatter.ISO_DATE_TIME;
 import static java.util.stream.Collectors.groupingBy;
+import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService.parseYearMonthFromFilename;
 import static reactor.core.scheduler.Schedulers.boundedElastic;
 
 @Slf4j
@@ -38,8 +40,10 @@ public class MonthlyFilesMigration {
    * - all the candles from the source are found in the destination
    * - the candles are ordered
    * - there are no duplicate candles (by time)
+   *
+   * via method {@link MonthlyFilesMigration#allLinesEqualInOrder(String, List, List)}
    */
-  private static void testAllCandles() throws IOException {
+  private static void testAllCandles() {
     log.info("Test Migration to Monthly Files Starting...");
     var processedCount = new AtomicInteger(0);
 
@@ -75,6 +79,11 @@ public class MonthlyFilesMigration {
                   Stream::close
               )
               .filter(Files::isRegularFile)
+              .sort((a, b) -> {
+                var ym1 = parseYearMonthFromFilename(a.getFileName().toString());
+                var ym2 = parseYearMonthFromFilename(b.getFileName().toString());
+                return ym1.compareTo(ym2);
+              })
               .flatMap(monthlyFile -> Mono.fromCallable(() -> Files.readAllLines(monthlyFile)))
               .reduce(new ArrayList<String>(), (acc, next) -> {
                 next.removeFirst();
@@ -82,7 +91,7 @@ public class MonthlyFilesMigration {
                 return acc;
               })
               .zipWith(allLines$)
-              .map(t -> Math.abs(t.getT1().size() - t.getT2().size()) < 10)
+              .map(t -> allLinesEqualInOrder(fileName, t.getT1(), t.getT2()))
               .doOnNext(i -> {
                 if (!i) {
                   log.warn("Number of line difference too large for {}!", fileName);
@@ -93,13 +102,23 @@ public class MonthlyFilesMigration {
                 return Mono.empty();
               });
         })
-        .doOnNext(ignored -> {
-          var current = processedCount.incrementAndGet();
-          if (current % 10 == 0) log.info("Processed {} files", current);
-        })
+        .doOnNext(ignored -> logProgress(processedCount))
         .sequential()
         // block until done
         .blockLast();
+  }
+
+  private static boolean allLinesEqualInOrder(String fileName, List<String> t1, List<String> t2) {
+    if (Math.abs(t1.size() - t2.size()) > 10) {
+      log.warn("File size discrepancy ({} lines) for {}", Math.abs(t1.size() - t2.size()), fileName);
+    }
+    for (int i = 0; i < Math.min(t1.size(), t2.size()); i++) {
+      if (!t1.get(i).equals(t2.get(i))) {
+        log.warn("Line {}/{} not equal for {}", i + 1, Math.min(t1.size(), t2.size()), fileName);
+        return false;
+      }
+    }
+    return true;
   }
 
   private static void migrate() throws IOException {
@@ -174,14 +193,18 @@ public class MonthlyFilesMigration {
               });
         })
         .doOnNext(ignored -> {
-          var current = processedCount.incrementAndGet();
-          if (current % 10 == 0) log.info("Processed {} files", current);
+          logProgress(processedCount);
         })
         .sequential()
         // block until done
         .blockLast();
 
     log.info("Migration to Monthly Files Complete!");
+  }
+
+  private static void logProgress(AtomicInteger processedCount) {
+    var current = processedCount.incrementAndGet();
+    if (current % 10 == 0) log.info("Processed {} files", current);
   }
 
 }

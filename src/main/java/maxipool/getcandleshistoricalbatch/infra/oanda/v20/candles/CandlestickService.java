@@ -297,7 +297,7 @@ public class CandlestickService {
    * Parse the yyyy_MM portion from a filename like:
    * "AUD_CAD-M1-2022_12.csv" -> YearMonth.of(2022, 12)
    */
-  private static YearMonth parseYearMonthFromFilename(String fileName) {
+  public static YearMonth parseYearMonthFromFilename(String fileName) {
     var m = YYYY_MM_REGEXP.matcher(fileName);
     if (m.find()) {
       int year = Integer.parseInt(m.group(1));
