@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import maxipool.getcandleshistoricalbatch.common.csv.CsvCandle;
 import maxipool.getcandleshistoricalbatch.common.file.CleanupUtil;
 import maxipool.getcandleshistoricalbatch.common.file.CopyFileUtil;
+import maxipool.getcandleshistoricalbatch.email.EmailService;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.model.GetCandlesResponse;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
@@ -59,6 +60,7 @@ public class CandlestickService {
   private final OandaRestResource oandaRestResource;
   private final CandlestickMapper candlestickMapper;
   private final V20Properties v20Properties;
+  private final EmailService emailService;
 
   /**
    * @param instrument
@@ -90,10 +92,10 @@ public class CandlestickService {
 
       var failedIgs = result.entrySet().stream().filter(i -> !i.getValue()).map(Entry::getKey).map(IG::toString).toList();
       if (!failedIgs.isEmpty()) {
-        var msg1 = "Failed to update data for: %s".formatted(failedIgs);
-        log.info(msg1);
-        logToFile("As of %s".formatted(ZonedDateTime.now(ZONE_TORONTO)));
+        var msg1 = "As of %s%nFailed to update data for: %s"
+            .formatted(ZonedDateTime.now(ZONE_TORONTO), failedIgs);
         logToFile(msg1);
+        emailService.sendEmail(msg1);
         return false;
       }
       return true;

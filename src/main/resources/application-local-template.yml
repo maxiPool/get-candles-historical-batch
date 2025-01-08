@@ -4,3 +4,8 @@ infra:
     v20:
       token: <add-to-application-local.yml>
       accountId: <add-to-application-local.yml>
+
+spring.mail:
+  username: your-email@mail.com
+  password: your-email-password
+  recipient: some-email@mail.com

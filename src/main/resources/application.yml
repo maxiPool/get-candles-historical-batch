@@ -24,6 +24,17 @@ spring:
       adjust_dates_to_context_time_zone: false
       use_big_decimal_for_floats: true
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    protocol: smtp
+    properties.mail.smtp:
+      auth: true
+      starttls.enable: true
+      connectiontimeout: 5000
+      timeout: 5000
+      writetimeout: 5000
+
 infra:
   oanda:
     v20:
