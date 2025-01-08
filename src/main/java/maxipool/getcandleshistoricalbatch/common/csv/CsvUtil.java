@@ -10,6 +10,8 @@ import jakarta.annotation.Nullable;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
+
 @UtilityClass
 @Slf4j
 public class CsvUtil {
@@ -56,11 +58,19 @@ public class CsvUtil {
     return candlesToCsvHelper(candles, csvSchemaWithHeader);
   }
 
+  public static String candlesToCsvWithHeader(List<CsvCandle> candles) {
+    return candlesToCsvWithHeader(candles.toArray(CsvCandle[]::new));
+  }
+
   /**
    * Candles to a CSV format string, WITHOUT the header.
    */
   public static String candlesToCsvWithoutHeader(CsvCandle[] candles) {
     return candlesToCsvHelper(candles, csvSchemaWithoutHeader);
+  }
+
+  public static String candlesToCsvWithoutHeader(List<CsvCandle> candles) {
+    return candlesToCsvHelper(candles.toArray(CsvCandle[]::new), csvSchemaWithoutHeader);
   }
 
   @Nullable
