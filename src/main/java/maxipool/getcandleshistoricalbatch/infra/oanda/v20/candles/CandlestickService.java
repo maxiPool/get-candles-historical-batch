@@ -98,6 +98,7 @@ public class CandlestickService {
         emailService.sendEmail(msg1);
         return false;
       }
+      logToFile("As of %s%nSuccessfully Downloaded Most Recent Candle Data".formatted(ZonedDateTime.now(ZONE_TORONTO)));
       return true;
     }
   }
