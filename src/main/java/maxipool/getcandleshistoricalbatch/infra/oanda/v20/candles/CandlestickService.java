@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -55,6 +56,7 @@ public class CandlestickService {
   private static final ZoneId ZONE_TORONTO = ZoneId.of("America/Toronto");
   private static final List<CandlestickGranularity> GRANULARITY_LIST = List.of(M15, M1);
   private static final Pattern YYYY_MM_REGEXP = Pattern.compile("-(\\d{4})_(\\d{2})\\.csv$");
+  private static final AtomicInteger PROGRESS = new AtomicInteger(0);
 
   private final InstrumentsService instrumentsService;
   private final OandaRestResource oandaRestResource;
@@ -78,6 +80,7 @@ public class CandlestickService {
     log.info("Found {} instruments on Oanda", instruments.size());
 
     var latestFilesByInstrumentAndGranularity = getLatestFilesByInstrumentAndGranularity(instruments);
+    var total = latestFilesByInstrumentAndGranularity.size();
 
     try (var executorService = newFixedThreadPool(getRuntime().availableProcessors())) {
       var result = latestFilesByInstrumentAndGranularity
@@ -87,7 +90,9 @@ public class CandlestickService {
                   .map(p -> entry(e.getKey(), handleExistingFile(e.getKey(), p)))
                   .orElseGet(() -> entry(e.getKey(), handleNoExistingFile(e.getKey()))),
               executorService))
-          .collect(collectingAndThen(toList(), fs -> fs.stream().map(CompletableFuture::join)))
+          .collect(collectingAndThen(
+              toList(),
+              fs -> fs.stream().map(CompletableFuture::join).map(i -> logProgress(i, total))))
           .collect(toMap(Entry::getKey, Entry::getValue));
 
       var failedIgs = result.entrySet().stream().filter(i -> !i.getValue()).map(Entry::getKey).map(IG::toString).toList();
@@ -101,6 +106,14 @@ public class CandlestickService {
       logToFile("As of %s%nSuccessfully Downloaded Most Recent Candle Data".formatted(ZonedDateTime.now(ZONE_TORONTO)));
       return true;
     }
+  }
+
+  private static Entry<IG, Boolean> logProgress(Entry<IG, Boolean> i, int total) {
+    var count = PROGRESS.incrementAndGet();
+    if (count % 25 == 0) {
+      log.info("{}/{} files processed", count, total);
+    }
+    return i;
   }
 
   private Map<IG, Optional<Path>> getLatestFilesByInstrumentAndGranularity(List<Instrument> instruments) {
