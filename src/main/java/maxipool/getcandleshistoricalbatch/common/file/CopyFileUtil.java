@@ -23,7 +23,9 @@ public class CopyFileUtil {
       throw e;
     }
     var dstPath = subDir.resolve(filename);
-    Files.delete(dstPath);
+    if (Files.exists(dstPath)) {
+      Files.delete(dstPath);
+    }
     Files.copy(srcPath, dstPath);
     assertFileLengthsEqual(srcPath, dstPath, filename);
   }
