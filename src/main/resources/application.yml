@@ -38,6 +38,7 @@ spring:
 infra:
   oanda:
     v20:
+      base: "C:\\Users\\maxim\\Documents"
       devStreamUrl: "https://stream-fxpractice.oanda.com"
       prodStreamUrl: "https://stream-fxtrade.oanda.com"
       devRestUrl: "https://api-fxpractice.oanda.com"
@@ -45,8 +46,8 @@ infra:
       isProduction: false
       candlestick:
         enabled: true
-        outputPath: "F:\\candles-monthly"
-        copyOutputPath: "C:\\Users\\Max\\Documents\\candles-monthly"
+        outputPath: "${infra.oanda.v20.base}\\all_candles\\candles-monthly"
+        copyOutputPath: "${infra.oanda.v20.base}\\all_candles_copy\\candles-monthly"
 
 app:
   lock-file-path: "${infra.oanda.v20.candlestick.outputPath}\\a_lock_file.txt"

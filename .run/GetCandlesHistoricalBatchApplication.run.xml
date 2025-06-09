@@ -1,0 +1,17 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="GetCandlesHistoricalBatchApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" nameIsGenerated="true">
+    <option name="ACTIVE_PROFILES" value="local" />
+    <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UpdateClassesAndResources" />
+    <module name="get-candles-historical-batch" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="maxipool.getcandleshistoricalbatch.GetCandlesHistoricalBatchApplication" />
+    <extension name="coverage">
+      <pattern>
+        <option name="PATTERN" value="maxipool.getcandleshistoricalbatch.*" />
+        <option name="ENABLED" value="true" />
+      </pattern>
+    </extension>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
