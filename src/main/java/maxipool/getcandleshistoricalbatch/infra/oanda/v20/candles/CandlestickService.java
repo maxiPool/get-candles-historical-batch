@@ -182,7 +182,7 @@ public class CandlestickService {
       logToFile(msg);
       return false;
     }
-    var candlesByYM = getCandlesByYM(response);
+    var candlesByYM = getCandlesByYM(response, Instant.EPOCH);
 
     // Write each group to <instrument>_<granularity>_YYYY_MM.csv
     return candlesByYM
@@ -210,9 +210,10 @@ public class CandlestickService {
         .reduce(true, (acc, next) -> acc && next);
   }
 
-  private Map<YearMonth, List<CsvCandle>> getCandlesByYM(GetCandlesResponse response) {
+  private Map<YearMonth, List<CsvCandle>> getCandlesByYM(GetCandlesResponse response, Instant lastTime) {
     return response
         .getCandles().stream()
+        .filter(c -> Instant.parse(c.getTime()).isAfter(lastTime.minusSeconds(3600)))
         .filter(Candlestick::getComplete)
         .map(candlestickMapper::oandaCandleToCsvCandle)
         .collect(groupingBy(c -> YearMonth.from(c.getTime())));
@@ -258,7 +259,7 @@ public class CandlestickService {
     }
 
     // 3) Group by year/month
-    var candlesByYM = getCandlesByYM(response);
+    var candlesByYM = getCandlesByYM(response, lastTime);
 
     // 4) For the year/month that matches `latestFile` => we append
     //    If there's a new year/month => create a new file
