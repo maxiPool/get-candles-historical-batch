@@ -36,6 +36,7 @@ import static com.oanda.v20.instrument.CandlestickGranularity.M15;
 import static java.lang.Runtime.getRuntime;
 import static java.time.temporal.ChronoUnit.HOURS;
 import static java.time.temporal.ChronoUnit.SECONDS;
+import static java.util.Comparator.comparing;
 import static java.util.Map.entry;
 import static java.util.Optional.ofNullable;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
@@ -128,33 +129,31 @@ public class CandlestickService {
 
           var subDir = Paths.get(v20Properties.candlestick().outputPath(), instrument, granularity);
           if (!Files.isDirectory(subDir)) {
-            log.warn("No folder for '{}' / '{}'. Skipping.", instrument, granularity);
-            return Stream.empty();
+            return Stream.of(entry(ig, Optional.<Path>empty()));
           }
 
           try (var files = Files.list(subDir)) {
-            List<Entry<IG, Path>> list = files
+            return files
                 .filter(Files::isRegularFile)
                 .filter(path -> isMatchingFile(path, instrument, granularity))
-                .map(path -> entry(ig, path))
-                .toList();
-            return list.stream();
+                .map(path -> entry(ig, Optional.of(path)));
           } catch (IOException e) {
             log.warn("IOException", e);
-            return Stream.empty();
+            return Stream.of(entry(ig, Optional.<Path>empty()));
           }
         })
         // pick the latest file by YearMonth from the filename.
         .collect(groupingBy(
             Entry::getKey,
-            maxBy((entry1, entry2) -> {
-              var ym1 = parseYearMonthFromFilename(entry1.getValue().getFileName().toString());
-              var ym2 = parseYearMonthFromFilename(entry2.getValue().getFileName().toString());
-              return ym1.compareTo(ym2);
-            })
-        ))
-        .entrySet().stream()
-        .collect(toMap(Entry::getKey, e -> e.getValue().map(Entry::getValue)));
+            collectingAndThen(
+                maxBy(comparing(e ->
+                    e.getValue()
+                        .map(p -> parseYearMonthFromFilename(p.getFileName().toString()))
+                        .orElse(YearMonth.of(1900, 0))  // fallback if missing
+                )),
+                optionalEntry -> optionalEntry.flatMap(Entry::getValue)
+            )
+        ));
   }
 
   /**
