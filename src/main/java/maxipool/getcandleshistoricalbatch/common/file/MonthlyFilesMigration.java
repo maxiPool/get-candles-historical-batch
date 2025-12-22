@@ -20,6 +20,10 @@ import static java.util.stream.Collectors.groupingBy;
 import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.CandlestickService.parseYearMonthFromFilename;
 import static reactor.core.scheduler.Schedulers.boundedElastic;
 
+/**
+ * Script used to migrate from a single file per Instrument+TimePeriod to 1 file per month.
+ * Migration was done in January 2025.
+ */
 @Slf4j
 public class MonthlyFilesMigration {
 

@@ -136,7 +136,9 @@ public class CandlestickService {
             return files
                 .filter(Files::isRegularFile)
                 .filter(path -> isMatchingFile(path, instrument, granularity))
-                .map(path -> entry(ig, Optional.of(path)));
+                .map(path -> entry(ig, Optional.of(path)))
+                .toList()
+                .stream();
           } catch (IOException e) {
             log.warn("IOException", e);
             return Stream.of(entry(ig, Optional.<Path>empty()));
@@ -149,7 +151,7 @@ public class CandlestickService {
                 maxBy(comparing(e ->
                     e.getValue()
                         .map(p -> parseYearMonthFromFilename(p.getFileName().toString()))
-                        .orElse(YearMonth.of(1900, 0))  // fallback if missing
+                        .orElse(YearMonth.of(1900, 1))  // fallback if missing
                 )),
                 optionalEntry -> optionalEntry.flatMap(Entry::getValue)
             )

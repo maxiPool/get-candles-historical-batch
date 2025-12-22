@@ -38,7 +38,8 @@ spring:
 infra:
   oanda:
     v20:
-      base: "C:\\Users\\maxim\\Documents"
+      # linux path
+      base: "/home/max/Documents"
       devStreamUrl: "https://stream-fxpractice.oanda.com"
       prodStreamUrl: "https://stream-fxtrade.oanda.com"
       devRestUrl: "https://api-fxpractice.oanda.com"
@@ -46,11 +47,13 @@ infra:
       isProduction: false
       candlestick:
         enabled: true
-        outputPath: "${infra.oanda.v20.base}\\all_candles\\candles-monthly"
-        copyOutputPath: "${infra.oanda.v20.base}\\all_candles_copy\\candles-monthly"
+        # linux path
+        outputPath: "${infra.oanda.v20.base}/all_candles/candles-monthly"
+        copyOutputPath: "${infra.oanda.v20.base}/all_candles_copy/candles-monthly"
 
 app:
-  lock-file-path: "${infra.oanda.v20.candlestick.outputPath}\\a_lock_file.txt"
+  # linux path
+  lock-file-path: "${infra.oanda.v20.candlestick.outputPath}/a_lock_file.txt"
   disableOnDays:
     - SATURDAY
     - SUNDAY

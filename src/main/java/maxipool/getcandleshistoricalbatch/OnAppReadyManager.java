@@ -65,8 +65,26 @@ public class OnAppReadyManager {
   private String lockFilePath;
 
   private void preventDuplicateRun(Supplier<Boolean> resultSupplier) {
-    try (var channel = FileChannel.open(new File(lockFilePath).toPath(), READ, WRITE);
+    var lockFile = new File(lockFilePath);
+    var parentDir = lockFile.getParentFile();
+    if (parentDir != null && !parentDir.exists()) {
+      parentDir.mkdirs();
+    }
+
+    // Create lock file only if it doesn't exist (preserves existing timestamp data)
+    if (!lockFile.exists()) {
+      try {
+        lockFile.createNewFile();
+        log.info("Created new lock file: {}", lockFile);
+      } catch (IOException e) {
+        log.error("Failed to create lock file: {}", lockFile, e);
+        return;
+      }
+    }
+
+    try (var channel = FileChannel.open(lockFile.toPath(), READ, WRITE);
          var lock = channel.tryLock()) {
+      log.info("Trying to acquire lock file: {}", lockFile);
 
       if (lock != null) {
         log.info("Lock File acquired, checking last run timestamp...");
