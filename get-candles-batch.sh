@@ -1,5 +1,5 @@
 #!/bin/bash
-export JAVA_HOME="/home/max/.sdkman/candidates/java/current"
+export JAVA_HOME="/home/max/.sdkman/candidates/java/21.0.9-tem"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 cd /home/max/dev/projects/get-candles-historical-batch
