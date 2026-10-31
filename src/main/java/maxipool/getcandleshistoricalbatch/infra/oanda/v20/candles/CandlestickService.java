@@ -29,7 +29,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 import static com.oanda.v20.instrument.CandlestickGranularity.M1;
 import static com.oanda.v20.instrument.CandlestickGranularity.M15;
@@ -56,7 +55,7 @@ public class CandlestickService {
   private static final int MAX_CANDLE_COUNT_OANDA_API = 5_000;
   private static final ZoneId ZONE_TORONTO = ZoneId.of("America/Toronto");
   private static final List<CandlestickGranularity> GRANULARITY_LIST = List.of(M15, M1);
-  private static final Pattern YYYY_MM_REGEXP = Pattern.compile("-(\\d{4})_(\\d{2})\\.csv$");
+  private static final Pattern YYYY_MM_REGEXP = Pattern.compile("[-_](\\d{4})_(\\d{2})\\.csv$");
   private static final AtomicInteger PROGRESS = new AtomicInteger(0);
 
   private final InstrumentsService instrumentsService;
@@ -69,7 +68,7 @@ public class CandlestickService {
    * @param instrument
    * @param granularity
    */
-  private record IG(String instrument, CandlestickGranularity granularity) {
+  record IG(String instrument, CandlestickGranularity granularity) {
     @Override
     public String toString() {
       return "%s-%s".formatted(instrument, granularity);
@@ -82,6 +81,16 @@ public class CandlestickService {
 
     var latestFilesByInstrumentAndGranularity = getLatestFilesByInstrumentAndGranularity(instruments);
     var total = latestFilesByInstrumentAndGranularity.size();
+
+    var expected = instruments.size() * GRANULARITY_LIST.size();
+    if (!isCoverageComplete(expected, total)) {
+      var msg = "As of %s%nExpected %d instrument/granularity pairs to process but found %d; nothing was downloaded"
+          .formatted(ZonedDateTime.now(ZONE_TORONTO), expected, total);
+      log.error(msg);
+      logToFile(msg);
+      emailService.sendEmail(msg);
+      return false;
+    }
 
     try (var executorService = newFixedThreadPool(getRuntime().availableProcessors())) {
       var result = latestFilesByInstrumentAndGranularity
@@ -117,45 +126,48 @@ public class CandlestickService {
     return i;
   }
 
+  /**
+   * True when every expected instrument/granularity pair is present; an empty or short map must never count as success.
+   */
+  static boolean isCoverageComplete(int expected, int actual) {
+    return expected > 0 && actual == expected;
+  }
+
   private Map<IG, Optional<Path>> getLatestFilesByInstrumentAndGranularity(List<Instrument> instruments) {
-    return instruments
+    var igs = instruments
         .stream()
         .map(i -> i.getName().toString())
         .flatMap(i -> GRANULARITY_LIST.stream().map(g -> new IG(i, g)))
-        // Convert each instrument into a stream of the matching files in its folder
-        .flatMap(ig -> {
-          var instrument = ig.instrument();
-          var granularity = ig.granularity().toString();
+        .toList();
+    return findLatestFiles(v20Properties.candlestick().outputPath(), igs);
+  }
 
-          var subDir = Paths.get(v20Properties.candlestick().outputPath(), instrument, granularity);
-          if (!Files.isDirectory(subDir)) {
-            return Stream.of(entry(ig, Optional.<Path>empty()));
-          }
+  /**
+   * Returns exactly one entry per IG: the latest monthly file, or empty when the folder is missing,
+   * unreadable or holds no matching file (so the caller falls back to a by-count download).
+   */
+  static Map<IG, Optional<Path>> findLatestFiles(String outputPath, List<IG> igs) {
+    return igs.stream().collect(toMap(ig -> ig, ig -> findLatestFile(outputPath, ig)));
+  }
 
-          try (var files = Files.list(subDir)) {
-            return files
-                .filter(Files::isRegularFile)
-                .filter(path -> isMatchingFile(path, instrument, granularity))
-                .map(path -> entry(ig, Optional.of(path)))
-                .toList()
-                .stream();
-          } catch (IOException e) {
-            log.warn("IOException", e);
-            return Stream.of(entry(ig, Optional.<Path>empty()));
-          }
-        })
-        // pick the latest file by YearMonth from the filename.
-        .collect(groupingBy(
-            Entry::getKey,
-            collectingAndThen(
-                maxBy(comparing(e ->
-                    e.getValue()
-                        .map(p -> parseYearMonthFromFilename(p.getFileName().toString()))
-                        .orElse(YearMonth.of(1900, 1))  // fallback if missing
-                )),
-                optionalEntry -> optionalEntry.flatMap(Entry::getValue)
-            )
-        ));
+  private static Optional<Path> findLatestFile(String outputPath, IG ig) {
+    var instrument = ig.instrument();
+    var granularity = ig.granularity().toString();
+    var subDir = Paths.get(outputPath, instrument, granularity);
+    if (!Files.isDirectory(subDir)) {
+      return Optional.empty();
+    }
+    try (var files = Files.list(subDir)) {
+      return files
+          .filter(Files::isRegularFile)
+          .filter(path -> isMatchingFile(path, instrument, granularity))
+          .max(comparing((Path p) -> parseYearMonthFromFilename(p.getFileName().toString()))
+              // same month in both naming styles: prefer the canonical hyphen one
+              .thenComparing(p -> p.getFileName().toString().contains("-" + granularity + "-")));
+    } catch (IOException e) {
+      log.warn("IOException", e);
+      return Optional.empty();
+    }
   }
 
   /**
@@ -189,7 +201,7 @@ public class CandlestickService {
     return candlesByYM
         .entrySet().stream()
         .map(e -> {
-          var filename = String.format("%s_%s_%04d_%02d.csv",
+          var filename = String.format("%s-%s-%04d_%02d.csv",
               instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
           var outPath = subDir.resolve(filename);
           try {
@@ -272,12 +284,16 @@ public class CandlestickService {
     return candlesByYM
         .entrySet().stream()
         .map(e -> {
-          var filename = String.format("%s-%s-%04d_%02d.csv",
-              instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
+          var sameMonth = e.getKey().equals(latestFileYM);
+          // same month: keep writing to the existing file, whichever separator style it uses
+          var filename = sameMonth
+              ? latestFile.getFileName().toString()
+              : String.format("%s-%s-%04d_%02d.csv",
+                  instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
           var outPath = subDir.resolve(filename);
 
           try {
-            if (e.getKey().equals(latestFileYM)) {
+            if (sameMonth) {
               // Same month as the latestFile => append
               appendStringToFile(outPath, candlesToCsvWithoutHeader(e.getValue()));
             } else {
@@ -302,12 +318,12 @@ public class CandlestickService {
   }
 
   /**
-   * Check if filename looks like: instrument-granularity-yyyy_MM.csv
-   * Example: "AUD_CAD-M1-2022_12.csv"
+   * Check if filename looks like: instrument-granularity-yyyy_MM.csv (canonical) or instrument_granularity_yyyy_MM.csv (legacy).
+   * Example: "AUD_CAD-M1-2022_12.csv" or "AUD_CAD_M1_2022_12.csv"
    */
-  private static boolean isMatchingFile(Path path, String instrument, String granularity) {
+  static boolean isMatchingFile(Path path, String instrument, String granularity) {
     var fileName = path.getFileName().toString();
-    var regex = String.format("^%s-%s-(\\d{4})_(\\d{2})\\.csv$", instrument, granularity);
+    var regex = String.format("^%s[-_]%s[-_](\\d{4})_(\\d{2})\\.csv$", Pattern.quote(instrument), Pattern.quote(granularity));
     return fileName.matches(regex);
   }
 
