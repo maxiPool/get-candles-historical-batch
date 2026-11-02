@@ -38,3 +38,4 @@ build/
 .vscode/
 last-success.txt
 last-success.txt.tmp
+__pycache__/
