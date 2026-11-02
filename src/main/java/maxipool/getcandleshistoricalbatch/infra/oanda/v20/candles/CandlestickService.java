@@ -3,29 +3,33 @@ package maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles;
 import com.oanda.v20.instrument.Candlestick;
 import com.oanda.v20.instrument.CandlestickGranularity;
 import com.oanda.v20.primitives.Instrument;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import maxipool.getcandleshistoricalbatch.AppProperties;
 import maxipool.getcandleshistoricalbatch.common.csv.CsvCandle;
 import maxipool.getcandleshistoricalbatch.common.file.CleanupUtil;
 import maxipool.getcandleshistoricalbatch.common.file.CopyFileUtil;
-import maxipool.getcandleshistoricalbatch.email.EmailService;
+import maxipool.getcandleshistoricalbatch.common.time.TradingTime;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.candles.resource.OandaRestResource;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.model.GetCandlesResponse;
 import maxipool.getcandleshistoricalbatch.infra.oanda.v20.properties.V20Properties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
@@ -36,33 +40,62 @@ import static java.lang.Runtime.getRuntime;
 import static java.time.temporal.ChronoUnit.HOURS;
 import static java.time.temporal.ChronoUnit.SECONDS;
 import static java.util.Comparator.comparing;
-import static java.util.Map.entry;
-import static java.util.Optional.ofNullable;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static java.util.concurrent.Executors.newFixedThreadPool;
-import static java.util.stream.Collectors.*;
+import static java.util.stream.Collectors.groupingBy;
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
 import static maxipool.getcandleshistoricalbatch.common.csv.CsvUtil.*;
 import static maxipool.getcandleshistoricalbatch.common.file.ReadFileUtil.getLastLineFromCsvCandleFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.appendStringToFile;
 import static maxipool.getcandleshistoricalbatch.common.file.WriteFileUtil.writeToFileThatDoesntExist;
-import static maxipool.getcandleshistoricalbatch.common.log.LogFileUtil.logToFile;
 import static maxipool.getcandleshistoricalbatch.infra.oanda.v20.model.Rfc3339.YMDHMS_FORMATTER;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class CandlestickService {
   private static final int MAX_CANDLE_COUNT_OANDA_API = 5_000;
   private static final ZoneId ZONE_TORONTO = ZoneId.of("America/Toronto");
   private static final List<CandlestickGranularity> GRANULARITY_LIST = List.of(M15, M1);
   private static final Pattern YYYY_MM_REGEXP = Pattern.compile("[-_](\\d{4})_(\\d{2})\\.csv$");
-  private static final AtomicInteger PROGRESS = new AtomicInteger(0);
+  /** ~50 requests/s overall; Oanda allows ~100. */
+  private static final long MIN_REQUEST_INTERVAL_MS = 20;
+  private static final int MAX_LISTED = 20;
 
   private final InstrumentsService instrumentsService;
   private final OandaRestResource oandaRestResource;
   private final CandlestickMapper candlestickMapper;
   private final V20Properties v20Properties;
-  private final EmailService emailService;
+  private final AppProperties appProperties;
+  private final Clock clock;
+  private final ChunkedCandleFetcher fetcher;
+  private final AtomicInteger progress = new AtomicInteger(0);
+
+  @Autowired
+  public CandlestickService(InstrumentsService instrumentsService,
+                            OandaRestResource oandaRestResource,
+                            CandlestickMapper candlestickMapper,
+                            V20Properties v20Properties,
+                            AppProperties appProperties) {
+    this(instrumentsService, oandaRestResource, candlestickMapper, v20Properties, appProperties,
+        Clock.systemUTC(), new ChunkedCandleFetcher(oandaRestResource, Thread::sleep, MIN_REQUEST_INTERVAL_MS));
+  }
+
+  CandlestickService(InstrumentsService instrumentsService,
+                     OandaRestResource oandaRestResource,
+                     CandlestickMapper candlestickMapper,
+                     V20Properties v20Properties,
+                     AppProperties appProperties,
+                     Clock clock,
+                     ChunkedCandleFetcher fetcher) {
+    this.instrumentsService = instrumentsService;
+    this.oandaRestResource = oandaRestResource;
+    this.candlestickMapper = candlestickMapper;
+    this.v20Properties = v20Properties;
+    this.appProperties = appProperties;
+    this.clock = clock;
+    this.fetcher = fetcher;
+  }
 
   /**
    * @param instrument
@@ -75,76 +108,177 @@ public class CandlestickService {
     }
   }
 
-  public boolean getOandaHistoricalMarketData() {
-    var instruments = instrumentsService.findAll();
-    log.info("Found {} instruments on Oanda", instruments.size());
-
-    var latestFilesByInstrumentAndGranularity = getLatestFilesByInstrumentAndGranularity(instruments);
-    var total = latestFilesByInstrumentAndGranularity.size();
-
-    var expected = instruments.size() * GRANULARITY_LIST.size();
-    if (!isCoverageComplete(expected, total)) {
-      var msg = "As of %s%nExpected %d instrument/granularity pairs to process but found %d; nothing was downloaded"
-          .formatted(ZonedDateTime.now(ZONE_TORONTO), expected, total);
-      log.error(msg);
-      logToFile(msg);
-      emailService.sendEmail(msg);
-      return false;
+  /**
+   * Outcome of one pair.
+   *
+   * @param error        null on success
+   * @param newCandles   candles written (or that would be written, in a dry run)
+   * @param lastCandle   time of the newest candle on disk after the run (null when unknown)
+   * @param alreadyFresh the file already held a candle from the last hour, nothing was requested
+   */
+  record PairResult(IG ig, String error, long newCandles, Instant lastCandle, boolean alreadyFresh) {
+    static PairResult failed(IG ig, String error) {
+      return new PairResult(ig, error, 0, null, false);
     }
 
-    try (var executorService = newFixedThreadPool(getRuntime().availableProcessors())) {
-      var result = latestFilesByInstrumentAndGranularity
-          .entrySet().stream()
-          .map(e -> supplyAsync(() -> e
-                  .getValue()
-                  .map(p -> entry(e.getKey(), handleExistingFile(e.getKey(), p)))
-                  .orElseGet(() -> entry(e.getKey(), handleNoExistingFile(e.getKey()))),
-              executorService))
-          .collect(collectingAndThen(
-              toList(),
-              fs -> fs.stream().map(CompletableFuture::join).map(i -> logProgress(i, total))))
-          .collect(toMap(Entry::getKey, Entry::getValue));
-
-      var failedIgs = result.entrySet().stream().filter(i -> !i.getValue()).map(Entry::getKey).map(IG::toString).toList();
-      if (!failedIgs.isEmpty()) {
-        var msg1 = "As of %s%nFailed to update data for: %s"
-            .formatted(ZonedDateTime.now(ZONE_TORONTO), failedIgs);
-        logToFile(msg1);
-        emailService.sendEmail(msg1);
-        return false;
-      }
-      logToFile("As of %s%nSuccessfully Downloaded Most Recent Candle Data".formatted(ZonedDateTime.now(ZONE_TORONTO)));
-      return true;
+    boolean ok() {
+      return error == null;
     }
-  }
-
-  private static Entry<IG, Boolean> logProgress(Entry<IG, Boolean> i, int total) {
-    var count = PROGRESS.incrementAndGet();
-    if (count % 25 == 0) {
-      log.info("{}/{} files processed", count, total);
-    }
-    return i;
   }
 
   /**
-   * True when every expected instrument/granularity pair is present; an empty or short map must never count as success.
+   * @param problems empty on success; each entry is one reason to fail loudly
    */
-  static boolean isCoverageComplete(int expected, int actual) {
-    return expected > 0 && actual == expected;
+  public record RunReport(List<String> problems, long newCandles, int pairs) {
+    public boolean ok() {
+      return problems.isEmpty();
+    }
   }
 
-  private Map<IG, Optional<Path>> getLatestFilesByInstrumentAndGranularity(List<Instrument> instruments) {
-    var igs = instruments
+  /**
+   * Data folder sanity before anything is locked, created or downloaded.
+   *
+   * @return a problem, or empty when the folder exists and holds at least one instrument folder
+   */
+  public static Optional<String> checkDataFolder(String outputPath) {
+    if (outputPath == null || outputPath.isBlank()) {
+      return Optional.of("Data folder is not configured (infra.oanda.v20.candlestick.outputPath)");
+    }
+    var dir = Paths.get(outputPath);
+    if (!Files.isDirectory(dir)) {
+      return Optional.of("Data folder is missing: %s (it is never created automatically)".formatted(outputPath));
+    }
+    try (var entries = Files.list(dir)) {
+      if (entries.noneMatch(Files::isDirectory)) {
+        return Optional.of("Data folder is empty (no instrument folders): %s".formatted(outputPath));
+      }
+    } catch (IOException e) {
+      return Optional.of("Data folder is unreadable: %s (%s)".formatted(outputPath, e.getMessage()));
+    }
+    return Optional.empty();
+  }
+
+  public RunReport getOandaHistoricalMarketData() {
+    var problems = new ArrayList<String>();
+    var outputPath = v20Properties.candlestick().outputPath();
+
+    var instruments = filterInstruments(instrumentsService.findAll(), problems);
+    log.info("Processing {} instruments{}{}", instruments.size(),
+        appProperties.onlyInstruments().isEmpty() ? "" : " (only " + appProperties.onlyInstruments() + ")",
+        appProperties.dryRun() ? " [DRY RUN: nothing is written]" : "");
+    if (!problems.isEmpty()) {
+      return new RunReport(problems, 0, 0);
+    }
+
+    var igs = toIgs(instruments);
+    var latestFiles = findLatestFiles(outputPath, igs);
+    var withoutFile = latestFiles.entrySet().stream().filter(e -> e.getValue().isEmpty()).map(e -> e.getKey().toString()).sorted().toList();
+    var matched = igs.size() - withoutFile.size();
+    if (matched == 0) {
+      problems.add("0 matched files: none of the %d instrument/granularity pairs has a monthly file in %s; nothing was downloaded"
+          .formatted(igs.size(), outputPath));
+      return new RunReport(problems, 0, igs.size());
+    }
+    if (withoutFile.size() > appProperties.maxPairsWithoutFile()) {
+      problems.add("%d of %d pairs have no monthly file in %s (max %d; wrong or partly wiped data folder?); nothing was downloaded: %s"
+          .formatted(withoutFile.size(), igs.size(), outputPath, appProperties.maxPairsWithoutFile(), limit(withoutFile)));
+      return new RunReport(problems, 0, igs.size());
+    }
+    if (!withoutFile.isEmpty()) {
+      log.warn("Seeding {} new pairs by count ({} candles each): {}", withoutFile.size(), MAX_CANDLE_COUNT_OANDA_API, withoutFile);
+    }
+
+    var results = runAll(latestFiles);
+    return summarize(results, problems);
+  }
+
+  private List<Instrument> filterInstruments(List<Instrument> all, List<String> problems) {
+    var only = appProperties.onlyInstruments();
+    if (only.isEmpty()) {
+      return all;
+    }
+    var names = all.stream().map(i -> i.getName().toString()).toList();
+    var unknown = only.stream().filter(o -> !names.contains(o)).sorted().toList();
+    if (!unknown.isEmpty()) {
+      problems.add("Unknown instruments in app.only-instruments: %s".formatted(unknown));
+    }
+    return all.stream().filter(i -> only.contains(i.getName().toString())).toList();
+  }
+
+  private static List<IG> toIgs(List<Instrument> instruments) {
+    return instruments
         .stream()
         .map(i -> i.getName().toString())
         .flatMap(i -> GRANULARITY_LIST.stream().map(g -> new IG(i, g)))
         .toList();
-    return findLatestFiles(v20Properties.candlestick().outputPath(), igs);
+  }
+
+  private List<PairResult> runAll(Map<IG, Optional<Path>> latestFiles) {
+    var total = latestFiles.size();
+    progress.set(0);
+    try (var executorService = newFixedThreadPool(Math.max(1, getRuntime().availableProcessors()))) {
+      var futures = latestFiles.entrySet().stream()
+          .map(e -> supplyAsync(() -> safely(e.getKey(), e.getValue()), executorService))
+          .toList();
+      return futures.stream().map(CompletableFuture::join).peek(r -> logProgress(total)).toList();
+    }
+  }
+
+  private PairResult safely(IG ig, Optional<Path> latestFile) {
+    try {
+      return latestFile.map(p -> handleExistingFile(ig, p)).orElseGet(() -> handleNoExistingFile(ig));
+    } catch (RuntimeException e) {
+      log.error("{} failed", ig, e);
+      return PairResult.failed(ig, e.getMessage());
+    }
+  }
+
+  private RunReport summarize(List<PairResult> results, List<String> problems) {
+    var now = clock.instant();
+    var failed = results.stream().filter(r -> !r.ok()).map(r -> r.ig() + ": " + r.error()).sorted().toList();
+    if (!failed.isEmpty()) {
+      problems.add("Failed download/write for %d pairs: %s".formatted(failed.size(), limit(failed)));
+    }
+
+    var newCandles = results.stream().mapToLong(PairResult::newCandles).sum();
+    var anyFresh = results.stream().anyMatch(PairResult::alreadyFresh);
+    var day = now.atZone(ZONE_TORONTO).getDayOfWeek();
+    var weekday = day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
+    if (weekday && newCandles == 0 && !anyFresh && failed.isEmpty()) {
+      problems.add("0 new candles on a weekday (%s) across %d pairs".formatted(day, results.size()));
+    }
+
+    var maxHours = appProperties.staleAfterTradingHours();
+    var stale = results.stream()
+        .filter(PairResult::ok)
+        .filter(r -> r.lastCandle() == null || TradingTime.tradingDurationBetween(r.lastCandle(), now).toHours() > maxHours)
+        .map(r -> r.ig() + " last=" + (r.lastCandle() == null ? "none" : YMDHMS_FORMATTER.format(r.lastCandle())))
+        .sorted()
+        .toList();
+    if (!stale.isEmpty()) {
+      problems.add("Stale data (> %d market hours old) after the run for %d pairs: %s".formatted(maxHours, stale.size(), limit(stale)));
+    }
+
+    log.info("Run summary: {} pairs, {} new candles, {} failed, {} stale{}", results.size(), newCandles, failed.size(),
+        stale.size(), appProperties.dryRun() ? " [DRY RUN]" : "");
+    return new RunReport(problems, newCandles, results.size());
+  }
+
+  private static String limit(Collection<String> items) {
+    var shown = items.stream().limit(MAX_LISTED).toList();
+    return items.size() > MAX_LISTED ? shown + " ... (+" + (items.size() - MAX_LISTED) + " more)" : shown.toString();
+  }
+
+  private void logProgress(int total) {
+    var count = progress.incrementAndGet();
+    if (count % 25 == 0) {
+      log.info("{}/{} pairs processed", count, total);
+    }
   }
 
   /**
    * Returns exactly one entry per IG: the latest monthly file, or empty when the folder is missing,
-   * unreadable or holds no matching file (so the caller falls back to a by-count download).
+   * unreadable or holds no matching file.
    */
   static Map<IG, Optional<Path>> findLatestFiles(String outputPath, List<IG> igs) {
     return igs.stream().collect(toMap(ig -> ig, ig -> findLatestFile(outputPath, ig)));
@@ -171,150 +305,141 @@ public class CandlestickService {
   }
 
   /**
-   * Calls Oanda API to get candles by count and saves them to the corresponding monthly files.
+   * New pair (no monthly file yet): seed it with the latest {@value MAX_CANDLE_COUNT_OANDA_API} candles.
    */
-  private boolean handleNoExistingFile(IG ig) {
+  private PairResult handleNoExistingFile(IG ig) {
     var instrument = ig.instrument();
     var granularity = ig.granularity().toString();
-
-    // Create the subfolder structure if needed
     var subDir = Paths.get(v20Properties.candlestick().outputPath(), instrument, granularity);
+
+    List<Candlestick> raw;
+    try {
+      var response = oandaRestResource.getCandlesWithCount(instrument, ig.granularity(), MAX_CANDLE_COUNT_OANDA_API);
+      raw = response == null || response.getCandles() == null ? List.of() : response.getCandles();
+    } catch (Exception e) {
+      return PairResult.failed(ig, "download by count failed (new pair): " + e.getMessage());
+    }
+    var candles = toNewCsvCandles(raw, null);
+    if (candles.isEmpty()) {
+      return PairResult.failed(ig, "new pair: Oanda returned no complete candles");
+    }
+    var lastCandle = candles.getLast().getTime().toInstant();
+    if (appProperties.dryRun()) {
+      logDryRun(ig, candles);
+      return new PairResult(ig, null, candles.size(), lastCandle, false);
+    }
     try {
       Files.createDirectories(subDir);
     } catch (IOException e) {
-      log.warn("Cannot create directory '{}'", subDir, e);
-      return false;
+      return PairResult.failed(ig, "cannot create directory %s: %s".formatted(subDir, e.getMessage()));
     }
-
-    var response = (GetCandlesResponse) null;
-    try {
-      response = oandaRestResource.getCandlesWithCount(instrument, ig.granularity(), MAX_CANDLE_COUNT_OANDA_API);
-    } catch (Exception e) {
-      var msg = "%nError while trying to get candles from COUNT for %s".formatted(instrument);
-      log.error(msg);
-      logToFile(msg);
-      return false;
+    for (var e : groupByMonth(candles).entrySet()) {
+      var filename = canonicalFilename(instrument, granularity, e.getKey());
+      var outPath = subDir.resolve(filename);
+      try {
+        writeToFileThatDoesntExist(outPath, candlesToCsvWithHeader(e.getValue()));
+        afterWrite(instrument, granularity, filename, outPath);
+      } catch (IOException ioException) {
+        return PairResult.failed(ig, "write failed for %s: %s".formatted(outPath, ioException.getMessage()));
+      }
     }
-    var candlesByYM = getCandlesByYM(response, Instant.EPOCH);
-
-    // Write each group to <instrument>_<granularity>_YYYY_MM.csv
-    return candlesByYM
-        .entrySet().stream()
-        .map(e -> {
-          var filename = String.format("%s-%s-%04d_%02d.csv",
-              instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
-          var outPath = subDir.resolve(filename);
-          try {
-            writeToFileThatDoesntExist(outPath, candlesToCsvWithHeader(e.getValue()));
-
-            CleanupUtil.cleanup(filename, outPath);
-            CopyFileUtil.copyToSecondDisk(
-                outPath,
-                v20Properties.candlestick().copyOutputPath(),
-                instrument,
-                granularity,
-                filename);
-            return true;
-          } catch (IOException ioException) {
-            log.warn("Error while appending candles to file: {}", filename, ioException);
-            return false;
-          }
-        })
-        .reduce(true, (acc, next) -> acc && next);
+    return new PairResult(ig, null, candles.size(), lastCandle, false);
   }
 
-  private Map<YearMonth, List<CsvCandle>> getCandlesByYM(GetCandlesResponse response, Instant lastTime) {
-    return response
-        .getCandles().stream()
-        .filter(c -> Instant.parse(c.getTime()).isAfter(lastTime.minusSeconds(3600)))
-        .filter(Candlestick::getComplete)
-        .map(candlestickMapper::oandaCandleToCsvCandle)
-        .collect(groupingBy(c -> YearMonth.from(c.getTime())));
-  }
-
-  private boolean handleExistingFile(IG ig, Path latestFile) {
+  private PairResult handleExistingFile(IG ig, Path latestFile) {
     var instrument = ig.instrument();
     var granularity = ig.granularity().toString();
 
-    // 1) Get the last timestamp from the last line of `latestFile`
-    var lastLine = getLastLineFromCsvCandleFile(latestFile);
-    var candle = csvStringWithoutHeaderToCsvCandlePojo(lastLine);
-    var lastTime = ofNullable(candle)
-        .flatMap(i -> ofNullable(i.getTime()))
-        .map(i -> Instant.parse(i.format(YMDHMS_FORMATTER)))
-        .map(i -> i.plus(granularityToSeconds(ig.granularity()), SECONDS))
-        .orElse(null);
-    if (lastTime == null) {
-      log.warn("Not Found: last time for {}", ig);
-      return false;
+    // 1) Last candle on disk
+    var candle = csvStringWithoutHeaderToCsvCandlePojo(getLastLineFromCsvCandleFile(latestFile));
+    if (candle == null || candle.getTime() == null) {
+      return PairResult.failed(ig, "cannot read the last candle of " + latestFile);
     }
-    if (Instant.now().minus(1, HOURS).isBefore(lastTime)) {
+    var lastOnDisk = Instant.parse(candle.getTime().format(YMDHMS_FORMATTER));
+    var from = lastOnDisk.plus(granularityToSeconds(ig.granularity()), SECONDS);
+    var now = clock.instant();
+    if (now.minus(1, HOURS).isBefore(from)) {
       log.info("Skipping {} since last candle was within the last hour", ig);
-      return true;
+      return new PairResult(ig, null, 0, lastOnDisk, true);
     }
 
-    // 2) Call Oanda from lastTs to now
-    var response = (GetCandlesResponse) null;
+    // 2) Chunked download from the last candle to now; any failed chunk fails the pair (no count fallback)
+    // there seems to be a delay in 'to' time on Oanda server; the minus 10 seconds avoids "to is in the future"
+    var to = now.minus(10, SECONDS);
+    List<Candlestick> raw;
     try {
-      response = getCandlesFromTime(instrument, ig.granularity(), lastTime);
-    } catch (Exception ignored) {
-      var msg = "%nError while trying to get candles from time for %s; will try getting it using count".formatted(ig);
-      log.error(msg);
-      logToFile(msg);
+      raw = fetcher.fetch(instrument, ig.granularity(), from, to);
+    } catch (ChunkedCandleFetcher.DownloadException e) {
+      return PairResult.failed(ig, e.getMessage());
+    }
+    var candles = toNewCsvCandles(raw, lastOnDisk);
+    if (candles.isEmpty()) {
+      return new PairResult(ig, null, 0, lastOnDisk, false);
+    }
+    var lastCandle = candles.getLast().getTime().toInstant();
+    if (appProperties.dryRun()) {
+      logDryRun(ig, candles);
+      return new PairResult(ig, null, candles.size(), lastCandle, false);
+    }
+
+    // 3) Append to the latest month file; new months get new files
+    var latestFileYM = parseYearMonthFromFilename(latestFile.getFileName().toString());
+    var subDir = latestFile.getParent();
+    for (var e : groupByMonth(candles).entrySet()) {
+      var sameMonth = e.getKey().equals(latestFileYM);
+      // same month: keep writing to the existing file, whichever separator style it uses
+      var filename = sameMonth ? latestFile.getFileName().toString() : canonicalFilename(instrument, granularity, e.getKey());
+      var outPath = subDir.resolve(filename);
       try {
-        response = oandaRestResource.getCandlesWithCount(instrument, ig.granularity(), MAX_CANDLE_COUNT_OANDA_API);
-      } catch (Exception ignored2) {
-        var msg2 = "%nError while trying to get candles from COUNT for %s".formatted(ig);
-        log.error(msg2);
-        logToFile(msg2);
-        return false;
+        if (sameMonth) {
+          appendStringToFile(outPath, candlesToCsvWithoutHeader(e.getValue()));
+        } else {
+          log.warn("Creating new file: {}", outPath);
+          writeToFileThatDoesntExist(outPath, candlesToCsvWithHeader(e.getValue()));
+        }
+        afterWrite(instrument, granularity, filename, outPath);
+      } catch (IOException ioException) {
+        return PairResult.failed(ig, "write failed for %s: %s".formatted(outPath, ioException.getMessage()));
       }
     }
+    return new PairResult(ig, null, candles.size(), lastCandle, false);
+  }
 
-    // 3) Group by year/month
-    var candlesByYM = getCandlesByYM(response, lastTime);
+  private void afterWrite(String instrument, String granularity, String filename, Path outPath) throws IOException {
+    CleanupUtil.cleanup(filename, outPath);
+    CopyFileUtil.copyToSecondDisk(outPath, v20Properties.candlestick().copyOutputPath(), instrument, granularity, filename);
+  }
 
-    // 4) For the year/month that matches `latestFile` => we append
-    //    If there's a new year/month => create a new file
-    var latestFileYM = parseYearMonthFromFilename(latestFile.getFileName().toString());
+  /**
+   * Complete candles strictly after {@code lastOnDisk}, sorted and de-duplicated by time
+   * (guards re-runs and chunk-boundary overlap).
+   */
+  private List<CsvCandle> toNewCsvCandles(List<Candlestick> raw, Instant lastOnDisk) {
+    var byTime = new TreeMap<Instant, CsvCandle>();
+    for (var c : raw) {
+      if (!Boolean.TRUE.equals(c.getComplete())) {
+        continue;
+      }
+      var csv = candlestickMapper.oandaCandleToCsvCandle(c);
+      var t = csv.getTime().toInstant();
+      if (lastOnDisk == null || t.isAfter(lastOnDisk)) {
+        byTime.putIfAbsent(t, csv);
+      }
+    }
+    return List.copyOf(byTime.values());
+  }
 
-    // Directory: e.g. F:\candles\instrument\granularity
-    var subDir = latestFile.getParent();
+  private static Map<YearMonth, List<CsvCandle>> groupByMonth(List<CsvCandle> candles) {
+    return candles.stream().collect(groupingBy(c -> YearMonth.from(c.getTime()), TreeMap::new, toList()));
+  }
 
-    return candlesByYM
-        .entrySet().stream()
-        .map(e -> {
-          var sameMonth = e.getKey().equals(latestFileYM);
-          // same month: keep writing to the existing file, whichever separator style it uses
-          var filename = sameMonth
-              ? latestFile.getFileName().toString()
-              : String.format("%s-%s-%04d_%02d.csv",
-                  instrument, granularity, e.getKey().getYear(), e.getKey().getMonthValue());
-          var outPath = subDir.resolve(filename);
+  private static void logDryRun(IG ig, List<CsvCandle> candles) {
+    groupByMonth(candles).forEach((ym, cs) -> log.info("[DRY RUN] {} {}: {} candles, {} .. {}", ig, ym, cs.size(),
+        cs.getFirst().getTime(), cs.getLast().getTime()));
+  }
 
-          try {
-            if (sameMonth) {
-              // Same month as the latestFile => append
-              appendStringToFile(outPath, candlesToCsvWithoutHeader(e.getValue()));
-            } else {
-              log.warn("Creating new file: {}", outPath);
-              writeToFileThatDoesntExist(outPath, candlesToCsvWithHeader(e.getValue()));
-            }
-
-            CleanupUtil.cleanup(filename, outPath);
-            CopyFileUtil.copyToSecondDisk(
-                outPath,
-                v20Properties.candlestick().copyOutputPath(),
-                instrument,
-                granularity,
-                filename);
-          } catch (IOException ioException) {
-            log.error("Failed writing to {}", outPath, ioException);
-            return false;
-          }
-          return true;
-        })
-        .reduce(true, (acc, next) -> acc && next);
+  private static String canonicalFilename(String instrument, String granularity, YearMonth ym) {
+    return String.format("%s-%s-%04d_%02d.csv", instrument, granularity, ym.getYear(), ym.getMonthValue());
   }
 
   /**
@@ -342,16 +467,6 @@ public class CandlestickService {
     }
   }
 
-  public GetCandlesResponse getCandlesFromTime(String instrument, CandlestickGranularity granularity, Instant fromTime) {
-    return oandaRestResource
-        .getCandlesFromTo(
-            instrument,
-            granularity,
-            YMDHMS_FORMATTER.format(fromTime),
-            YMDHMS_FORMATTER.format(Instant.now().minus(10, SECONDS)));
-    // there seems to be a delay in 'to' time on Oanda server; the minus 10 seconds is to mitigate the error message: "to is in the future"
-  }
-
   /**
    * Maximum candle count is 5000. Any granularity seems fine.
    */
@@ -359,7 +474,7 @@ public class CandlestickService {
     return oandaRestResource.getCandlesWithCount(instrument, granularity, count);
   }
 
-  private static long granularityToSeconds(CandlestickGranularity granularity) {
+  static long granularityToSeconds(CandlestickGranularity granularity) {
     return switch (granularity) {
       case S5 -> 5;
       case S10 -> 10;

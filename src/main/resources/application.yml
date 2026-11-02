@@ -38,8 +38,11 @@ spring:
 infra:
   oanda:
     v20:
-      # linux path
+      # Retired as output on 2026-11-02 (it ran in an empty ~/Documents since 12 Aug). The local profile may still
+      # override `base`; the candle paths below no longer depend on it.
       base: "/home/max/Documents"
+      # master data folder (owner ruling 2026-11-02)
+      data-root: "/home/max/data/documents"
       devStreamUrl: "https://stream-fxpractice.oanda.com"
       prodStreamUrl: "https://stream-fxtrade.oanda.com"
       devRestUrl: "https://api-fxpractice.oanda.com"
@@ -48,12 +51,19 @@ infra:
       candlestick:
         enabled: true
         # linux path
-        outputPath: "${infra.oanda.v20.base}/all_candles/candles-monthly"
-        copyOutputPath: "${infra.oanda.v20.base}/all_candles_copy/candles-monthly"
+        outputPath: "${infra.oanda.v20.data-root}/all_candles/candles-monthly"
+        copyOutputPath: "${infra.oanda.v20.data-root}/all_candles_copy/candles-monthly"
 
 app:
-  # linux path
-  lock-file-path: "${infra.oanda.v20.candlestick.outputPath}/a_lock_file.txt"
   disableOnDays:
     - SATURDAY
     - SUNDAY
+  # stale-jar check: the jar's build commit (set by bin/deploy.sh via -Dgit.commit) must match src/ and pom.xml at HEAD
+  repo-dir: "/home/max/dev/projects/get-candles-historical-batch"
+  build-commit: "@git.commit@"
+  stale-jar-check: true
+  stale-after-trading-hours: 24
+  max-pairs-without-file: 4
+  dry-run: false
+  # read by bin/freshness-check.py; relative to the working directory (the cron script cds into repo-dir)
+  success-marker-path: "last-success.txt"

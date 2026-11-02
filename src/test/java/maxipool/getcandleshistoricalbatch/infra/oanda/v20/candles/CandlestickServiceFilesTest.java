@@ -68,10 +68,13 @@ class CandlestickServiceFilesTest {
   }
 
   @Test
-  void emptyOrShortMapIsNotCoverage() {
-    assertFalse(CandlestickService.isCoverageComplete(246, 0));
-    assertFalse(CandlestickService.isCoverageComplete(246, 245));
-    assertFalse(CandlestickService.isCoverageComplete(0, 0));
-    assertTrue(CandlestickService.isCoverageComplete(246, 246));
+  void dataFolderMissingEmptyOrPresent() throws IOException {
+    assertTrue(CandlestickService.checkDataFolder(out.resolve("nope").toString()).orElseThrow().contains("missing"));
+    assertTrue(CandlestickService.checkDataFolder(out.toString()).orElseThrow().contains("empty"));
+    Files.writeString(out.resolve("a_lock_file.txt"), "1");
+    assertTrue(CandlestickService.checkDataFolder(out.toString()).orElseThrow().contains("empty"));
+    touch("EUR_USD", "M1", "EUR_USD-M1-2026_08.csv");
+    assertTrue(CandlestickService.checkDataFolder(out.toString()).isEmpty());
+    assertFalse(Files.exists(out.resolve("nope")), "the check never creates the folder");
   }
 }

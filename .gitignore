@@ -36,3 +36,5 @@ build/
 
 ### VS Code ###
 .vscode/
+last-success.txt
+last-success.txt.tmp

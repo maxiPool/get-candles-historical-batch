@@ -25,6 +25,8 @@
     <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
     <lombok.version>1.18.36</lombok.version>
     <jakarta.validation-api.version>3.1.0</jakarta.validation-api.version>
+    <!-- commit the jar is built from; bin/deploy.sh passes -Dgit.commit=$(git rev-parse HEAD) -->
+    <git.commit>unknown</git.commit>
   </properties>
 
   <dependencies>
