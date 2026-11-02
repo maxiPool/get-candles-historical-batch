@@ -1,5 +1,9 @@
 # Backfill proposal: mid-August 2026 → today (2026-11-01)
 
+> Status 2026-11-02: implemented on branch `candles-fix` (`ChunkedCandleFetcher`, no count fallback, dedupe,
+> retry/throttle, tests). Runbook with the gated commands: `docs/rollout-2026-11-02.md`. Root cause of the
+> unclosed gap: the June jar ran in an empty `~/Documents` folder and matched 0 files (see the runbook).
+
 ## Gap
 Master (`candles-monthly`) ends at 2026-08-12 ~20:59Z (AUD_NZD, EUR_USD checked, M15 and M1); 123 of 125 instrument folders have 2026_08 M15 files. About 80 days are missing per instrument/granularity.
 
